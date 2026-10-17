@@ -17,3 +17,13 @@ class UserResponse(BaseModel):
     email: str | None
 
     model_config = {"from_attributes": True}
+
+
+class UserLogin(BaseModel):
+    phone_number: str = Field(min_length=8, max_length=20)
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
