@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     access_token_expire_minutes: int = 30
 
+    otp_hmac_secret: str 
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

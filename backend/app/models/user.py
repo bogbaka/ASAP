@@ -69,3 +69,10 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    phone_verified: Mapped[bool] = mapped_column(
+    Boolean,
+    default=False,
+    server_default="false",
+    nullable=False,
+)
