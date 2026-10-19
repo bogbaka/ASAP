@@ -5,6 +5,10 @@ class ConversationScreen extends StatefulWidget {
   final String initials;
   final Color avatarColor;
   final bool isOnline;
+  final String? initialReply;
+  final String? repliedStatusText;
+  final String? phoneNumber;
+  final String? about;
 
   const ConversationScreen({
     super.key,
@@ -12,6 +16,10 @@ class ConversationScreen extends StatefulWidget {
     required this.initials,
     required this.avatarColor,
     this.isOnline = false,
+    this.initialReply,
+    this.repliedStatusText,
+    this.phoneNumber,
+    this.about,
   });
 
   @override
@@ -33,11 +41,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
 
   late final List<ChatMessage> _messages;
+  bool _isMuted = false;
+  bool _isBlocked = false;
 
   @override
   void initState() {
     super.initState();
     _messages = _createSampleMessages();
+    _messageController.text = widget.initialReply ?? '';
   }
 
   @override
@@ -84,6 +95,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
     if (text.isEmpty) return;
 
+    if (_isBlocked) {
+      _showDemoMessage('Unblock this contact before sending a message.');
+      return;
+    }
+
     final now = TimeOfDay.now();
     final String formattedTime = now.format(context);
 
@@ -126,66 +142,182 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _openContactDetails() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(24),
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _ContactInfoScreen(
+          contactName: widget.contactName,
+          initials: widget.initials,
+          avatarColor: widget.avatarColor,
+          isOnline: widget.isOnline,
+          phoneNumber: widget.phoneNumber,
+          about: widget.about,
+          isMuted: _isMuted,
+          isBlocked: _isBlocked,
+          onMuteChanged: (value) {
+            setState(() => _isMuted = value);
+            _showDemoMessage(
+              value
+                  ? 'Notifications muted for this conversation.'
+                  : 'Notifications enabled for this conversation.',
+            );
+          },
+          onBlockTap: () {
+            Navigator.of(context).pop();
+            _confirmBlockContact();
+          },
         ),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircleAvatar(
-                  radius: 42,
-                  backgroundColor: widget.avatarColor,
-                  child: Text(
-                    widget.initials,
-                    style: const TextStyle(
-                      color: _headingColor,
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  widget.contactName,
-                  style: const TextStyle(
-                    color: _headingColor,
-                    fontSize: 21,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.isOnline ? 'Online' : 'ASAP contact',
-                  style: const TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const ListTile(
-                  leading: Icon(
-                    Icons.info_outline,
-                    color: _primaryColor,
-                  ),
-                  title: Text('Contact information'),
-                  subtitle: Text(
-                    'Contact details will be available later.',
-                  ),
-                ),
-              ],
-            ),
-          ),
+    );
+  }
+
+  void _handleMoreOptionsSelected(String action) {
+    switch (action) {
+      case 'contact_info':
+        _openContactDetails();
+        break;
+      case 'search':
+        _searchConversation();
+        break;
+      case 'mute':
+        setState(() => _isMuted = !_isMuted);
+        _showDemoMessage(
+          _isMuted
+              ? 'Notifications muted for this conversation.'
+              : 'Notifications enabled for this conversation.',
         );
-      },
+        break;
+      case 'clear':
+        _confirmClearConversation();
+        break;
+      case 'report':
+        _confirmReportContact();
+        break;
+      case 'block':
+        _confirmBlockContact();
+        break;
+    }
+  }
+
+  void _searchConversation() {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Search conversation'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Enter a word or phrase',
+            prefixIcon: Icon(Icons.search),
+          ),
+          onSubmitted: (value) {
+            Navigator.pop(dialogContext);
+            _findMessage(value);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text;
+              Navigator.pop(dialogContext);
+              _findMessage(value);
+            },
+            child: const Text('Search'),
+          ),
+        ],
+      ),
+    ).whenComplete(controller.dispose);
+  }
+
+  void _findMessage(String query) {
+    final term = query.trim().toLowerCase();
+    if (term.isEmpty) {
+      _showDemoMessage('Enter a word or phrase to search.');
+      return;
+    }
+    final count = _messages
+        .where((message) => message.text.toLowerCase().contains(term))
+        .length;
+    _showDemoMessage(count == 0
+        ? 'No matching messages found.'
+        : 'Found $count matching message(s).');
+  }
+
+  void _confirmClearConversation() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear conversation?'),
+        content: const Text(
+          'This clears the messages shown in this demo. It cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              setState(_messages.clear);
+              _showDemoMessage('Conversation cleared.');
+            },
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmReportContact() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Report contact?'),
+        content: Text(
+          'Reporting ${widget.contactName} is not connected to the backend. '
+          'No report will be submitted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmBlockContact() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_isBlocked ? 'Unblock contact?' : 'Block contact?'),
+        content: Text(_isBlocked
+            ? 'Allow ${widget.contactName} to message you in this demo?'
+            : 'Block ${widget.contactName} in this demo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              setState(() => _isBlocked = !_isBlocked);
+              _showDemoMessage(_isBlocked
+                  ? '${widget.contactName} blocked in this demo.'
+                  : '${widget.contactName} unblocked.');
+            },
+            child: Text(_isBlocked ? 'Unblock' : 'Block'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -273,6 +405,72 @@ class _ConversationScreenState extends State<ConversationScreen> {
               color: _primaryColor,
             ),
           ),
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert, color: _primaryColor),
+            onSelected: _handleMoreOptionsSelected,
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'contact_info',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.person_outline),
+                  title: Text('Contact info'),
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'search',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.search),
+                  title: Text('Search'),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'mute',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    _isMuted
+                        ? Icons.notifications_active_outlined
+                        : Icons.notifications_off_outlined,
+                  ),
+                  title: Text(
+                    _isMuted ? 'Unmute notifications' : 'Mute notifications',
+                  ),
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'clear',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.delete_outline),
+                  title: Text('Clear conversation'),
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'report',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.flag_outlined),
+                  title: Text('Report contact'),
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'block',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    _isBlocked ? Icons.lock_open : Icons.block,
+                    color: _isBlocked ? Colors.green : Colors.red,
+                  ),
+                  title: Text(
+                    _isBlocked ? 'Unblock contact' : 'Block contact',
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -298,6 +496,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 },
               ),
             ),
+            if (widget.repliedStatusText != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: Colors.white,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Replying to status', style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor)),
+                    Text(widget.repliedStatusText!, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
             _buildMessageComposer(),
           ],
         ),
@@ -465,6 +676,217 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+class _ContactInfoScreen extends StatefulWidget {
+  final String contactName;
+  final String initials;
+  final Color avatarColor;
+  final bool isOnline;
+  final String? phoneNumber;
+  final String? about;
+  final bool isMuted;
+  final bool isBlocked;
+  final ValueChanged<bool> onMuteChanged;
+  final VoidCallback onBlockTap;
+
+  const _ContactInfoScreen({
+    required this.contactName,
+    required this.initials,
+    required this.avatarColor,
+    required this.isOnline,
+    required this.phoneNumber,
+    required this.about,
+    required this.isMuted,
+    required this.isBlocked,
+    required this.onMuteChanged,
+    required this.onBlockTap,
+  });
+
+  @override
+  State<_ContactInfoScreen> createState() => _ContactInfoScreenState();
+}
+
+class _ContactInfoScreenState extends State<_ContactInfoScreen> {
+  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _headingColor = Color(0xFF202C33);
+  static const Color _secondaryColor = Color(0xFF667781);
+  late bool _isMuted;
+
+  @override
+  void initState() {
+    super.initState();
+    _isMuted = widget.isMuted;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = widget.phoneNumber?.trim();
+    final about = widget.about?.trim();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F8F9),
+      appBar: AppBar(
+        title: const Text('Contact info'),
+        backgroundColor: Colors.white,
+        foregroundColor: _headingColor,
+        elevation: 1,
+      ),
+      body: ListView(
+        children: [
+          Container(
+            color: Colors.white,
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            child: Column(
+              children: [
+                CircleAvatar(
+                  radius: 54,
+                  backgroundColor: widget.avatarColor,
+                  child: Text(
+                    widget.initials,
+                    style: const TextStyle(
+                      color: _headingColor,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  widget.contactName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _headingColor,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  widget.isOnline ? 'Online' : 'ASAP contact',
+                  style: const TextStyle(color: _secondaryColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          _sectionCard(
+            title: 'Contact details',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.phone_outlined, color: _primaryColor),
+                title: const Text('Phone number'),
+                subtitle: Text(phone == null || phone.isEmpty
+                    ? 'Not provided'
+                    : phone),
+              ),
+              const Divider(height: 1, indent: 72),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: _primaryColor),
+                title: const Text('About'),
+                subtitle: Text(about == null || about.isEmpty
+                    ? 'No about information added'
+                    : about),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _sectionCard(
+            title: 'Media, links and documents',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: _primaryColor),
+                title: const Text('Media'),
+                trailing: const Text('0'),
+                onTap: () => _showEmptyContent(context, 'Media'),
+              ),
+              const Divider(height: 1, indent: 72),
+              ListTile(
+                leading: const Icon(Icons.link_outlined, color: _primaryColor),
+                title: const Text('Links'),
+                trailing: const Text('0'),
+                onTap: () => _showEmptyContent(context, 'Links'),
+              ),
+              const Divider(height: 1, indent: 72),
+              ListTile(
+                leading: const Icon(Icons.insert_drive_file_outlined, color: _primaryColor),
+                title: const Text('Documents'),
+                trailing: const Text('0'),
+                onTap: () => _showEmptyContent(context, 'Documents'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _sectionCard(
+            title: 'Settings',
+            children: [
+              SwitchListTile(
+                secondary: const Icon(Icons.notifications_off_outlined, color: _primaryColor),
+                title: const Text('Mute notifications'),
+                value: _isMuted,
+                activeThumbColor: _primaryColor,
+                onChanged: (value) {
+                  setState(() => _isMuted = value);
+                  widget.onMuteChanged(value);
+                },
+              ),
+              const Divider(height: 1, indent: 72),
+              ListTile(
+                leading: Icon(
+                  widget.isBlocked ? Icons.person_add_alt_1 : Icons.block,
+                  color: Colors.red.shade700,
+                ),
+                title: Text(
+                  widget.isBlocked ? 'Unblock contact' : 'Block contact',
+                  style: TextStyle(color: Colors.red.shade700),
+                ),
+                onTap: widget.onBlockTap,
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionCard({required String title, required List<Widget> children}) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: _primaryColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  void _showEmptyContent(BuildContext context, String contentType) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('No shared $contentType in this conversation yet.'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

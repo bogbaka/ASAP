@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'conversation_screen.dart';
+import 'account_settings_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key, required this.displayName});
@@ -1667,7 +1668,14 @@ class SettingsScreen extends StatelessWidget {
             icon: Icons.person_outline,
             title: 'Account',
             subtitle: 'Security and account information',
-            onTap: () => _showComingSoon(context, 'Account'),
+            onTap: () {
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const AccountSettingsScreen(),
+                ),
+              );
+            },
           ),
           _SettingsItem(
             icon: Icons.lock_outline,
@@ -1788,7 +1796,7 @@ class StatusUpdate {
   final bool isMine;
 }
 
-// Full-screen status viewer.
+// Full-screen status viewer with a local status-reply draft.
 class StatusViewerScreen extends StatefulWidget {
   const StatusViewerScreen({
     super.key,
@@ -1807,7 +1815,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     with SingleTickerProviderStateMixin {
   late int _currentIndex;
   late final AnimationController _progressController;
-
+  final TextEditingController _replyController = TextEditingController();
+  final FocusNode _replyFocus = FocusNode();
   static const Duration _statusDuration = Duration(seconds: 5);
 
   StatusUpdate get _currentStatus => widget.statuses[_currentIndex];
@@ -1815,22 +1824,26 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   @override
   void initState() {
     super.initState();
-
     _currentIndex = widget.statuses.isEmpty
         ? 0
         : widget.initialIndex.clamp(0, widget.statuses.length - 1);
-
     _progressController = AnimationController(
       vsync: this,
       duration: _statusDuration,
     )..addStatusListener(_handleProgressStatus);
-
-    if (widget.statuses.isNotEmpty) {
-      _startProgress();
-    }
+    _replyFocus.addListener(() {
+      if (_replyFocus.hasFocus) {
+        _progressController.stop();
+      } else if (mounted && widget.statuses.isNotEmpty) {
+        _progressController.forward();
+      }
+    });
+    if (widget.statuses.isNotEmpty) _startProgress();
   }
 
   void _startProgress() {
+    _replyController.clear();
+    _replyFocus.unfocus();
     _progressController
       ..stop()
       ..reset()
@@ -1838,17 +1851,12 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   void _handleProgressStatus(AnimationStatus status) {
-    if (status == AnimationStatus.completed && mounted) {
-      _showNextStatus();
-    }
+    if (status == AnimationStatus.completed && mounted) _showNextStatus();
   }
 
   void _showNextStatus() {
     if (_currentIndex < widget.statuses.length - 1) {
-      setState(() {
-        _currentIndex++;
-      });
-
+      setState(() => _currentIndex++);
       _startProgress();
     } else {
       Navigator.of(context).pop();
@@ -1856,19 +1864,33 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   void _showPreviousStatus() {
-    if (_currentIndex > 0) {
-      setState(() {
-        _currentIndex--;
-      });
+    if (_currentIndex > 0) setState(() => _currentIndex--);
+    _startProgress();
+  }
 
-      _startProgress();
-    } else {
-      _startProgress();
-    }
+  void _openReplyConversation() {
+    final reply = _replyController.text.trim();
+    if (reply.isEmpty || _currentStatus.isMine) return;
+    final status = _currentStatus;
+    _progressController.stop();
+    _replyFocus.unfocus();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(
+          contactName: status.name,
+          initials: status.initials,
+          avatarColor: status.avatarColor,
+          initialReply: reply,
+          repliedStatusText: status.text,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _replyFocus.dispose();
+    _replyController.dispose();
     _progressController.dispose();
     super.dispose();
   }
@@ -1878,23 +1900,14 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     if (widget.statuses.isEmpty) {
       return Scaffold(
         backgroundColor: const Color(0xFF101010),
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF101010),
-          foregroundColor: Colors.white,
-          title: const Text('Status'),
-        ),
-        body: const Center(
-          child: Text(
-            'No status updates available.',
-            style: TextStyle(color: Colors.white),
-          ),
-        ),
+        appBar: AppBar(title: const Text('Status')),
+        body: const Center(child: Text('No status updates available.',
+            style: TextStyle(color: Colors.white))),
       );
     }
-
     final status = _currentStatus;
-
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF101010),
       body: SafeArea(
         child: Stack(
@@ -1905,114 +1918,101 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      status.avatarColor.withValues(alpha: 0.95),
-                      const Color(0xFF101010),
-                    ],
+                    colors: [status.avatarColor.withValues(alpha: 0.95),
+                      const Color(0xFF101010)],
                   ),
                 ),
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      status.text,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
-                      ),
-                    ),
+                    padding: const EdgeInsets.fromLTRB(32, 90, 32, 100),
+                    child: Text(status.text, textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white, fontSize: 28,
+                        fontWeight: FontWeight.w600, height: 1.4)),
                   ),
                 ),
               ),
             ),
-            Positioned(
-              top: 8,
-              left: 12,
-              right: 12,
-              child: Column(
-                children: [
-                  AnimatedBuilder(
-                    animation: _progressController,
-                    builder: (context, child) {
-                      return LinearProgressIndicator(
-                        value: _progressController.value,
-                        backgroundColor: Colors.white30,
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          Colors.white,
-                        ),
-                        minHeight: 3,
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: status.avatarColor,
-                        child: Text(
-                          status.initials,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              status.name,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              status.time,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close status',
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
             Positioned.fill(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: _showPreviousStatus,
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: _showNextStatus,
-                      child: const SizedBox.expand(),
-                    ),
-                  ),
-                ],
-              ),
+              child: Row(children: [
+                Expanded(child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _showPreviousStatus,
+                  child: const SizedBox.expand(),
+                )),
+                Expanded(child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _showNextStatus,
+                  child: const SizedBox.expand(),
+                )),
+              ]),
             ),
+            Positioned(
+              top: 8, left: 12, right: 12,
+              child: Column(children: [
+                AnimatedBuilder(
+                  animation: _progressController,
+                  builder: (context, child) => LinearProgressIndicator(
+                    value: _progressController.value,
+                    backgroundColor: Colors.white30,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                    minHeight: 3,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(children: [
+                  CircleAvatar(backgroundColor: status.avatarColor,
+                    child: Text(status.initials,
+                      style: const TextStyle(color: Colors.white,
+                        fontWeight: FontWeight.bold))),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(status.name, style: const TextStyle(color: Colors.white,
+                        fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 3),
+                      Text(status.time, style: const TextStyle(
+                        color: Colors.white70, fontSize: 12)),
+                    ],
+                  )),
+                  IconButton(tooltip: 'Close status',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close, color: Colors.white)),
+                ]),
+              ]),
+            ),
+            if (!status.isMine)
+              Positioned(
+                left: 12, right: 12, bottom: 12,
+                child: Row(children: [
+                  Expanded(child: TextField(
+                    controller: _replyController,
+                    focusNode: _replyFocus,
+                    style: const TextStyle(color: Colors.white),
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 3, minLines: 1,
+                    onSubmitted: (_) => _openReplyConversation(),
+                    decoration: InputDecoration(
+                      hintText: 'Reply to ${status.name}...',
+                      hintStyle: const TextStyle(color: Colors.white70),
+                      filled: true,
+                      fillColor: const Color(0x99000000),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(26),
+                        borderSide: const BorderSide(color: Colors.white70)),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(26),
+                        borderSide: const BorderSide(color: Colors.white70)),
+                    ),
+                  )),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    tooltip: 'Continue reply in chat',
+                    onPressed: _openReplyConversation,
+                    icon: const Icon(Icons.send),
+                  ),
+                ]),
+              ),
           ],
         ),
       ),
