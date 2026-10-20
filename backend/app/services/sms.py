@@ -5,16 +5,23 @@ def send_verification_sms(
     phone_number: str,
     code: str,
 ) -> bool:
-    """Send a phone verification code through the configured SMS service."""
+    """
+    Send a verification code.
+
+    In development, print the code to the local server terminal.
+    In production, fail until a real SMS provider is configured.
+    """
 
     if settings.app_env == "development":
-        # Temporary development-only mock.
-        # A real SMS provider will replace this implementation.
-        print(
-            f"Development SMS prepared for {phone_number}. "
-            "OTP delivery is simulated."
+        masked_phone = (
+            f"{phone_number[:3]}****{phone_number[-2:]}"
         )
+
+        print(
+            f"\n[ASAP DEVELOPMENT OTP] "
+            f"Phone: {masked_phone} | Code: {code}\n"
+        )
+
         return True
 
-    # Production SMS delivery has not been configured yet.
     return False
