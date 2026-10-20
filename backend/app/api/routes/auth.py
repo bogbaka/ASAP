@@ -1,13 +1,18 @@
 from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
-from app.core.security import hash_password, verify_password
-from app.core.tokens import create_access_token
+from app.core.security import verify_password
+from app.core.tokens import (
+    create_access_token,
+    create_registration_token,
+    decode_registration_token,
+)
 from app.db.dependencies import get_db
 from app.models import PhoneVerification, User
 from app.schemas.auth import (
@@ -17,6 +22,7 @@ from app.schemas.auth import (
     OTPVerificationResponse,
 )
 from app.schemas.user import (
+    RegistrationResponse,
     TokenResponse,
     UserCreate,
     UserLogin,
@@ -32,64 +38,55 @@ from app.services.otp import (
 )
 from app.services.sms import send_verification_sms
 
-
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 OTP_RESEND_COOLDOWN_SECONDS = 60
 OTP_RESEND_WINDOW_MINUTES = 15
 MAX_OTP_RESENDS = 3
 
-GENERIC_OTP_MESSAGE = (
-    "If the phone number belongs to an unverified account, "
-    "a verification code will be sent."
-)
-
 
 def _get_user_by_phone(
     db: Session,
     phone_number: str,
 ) -> User | None:
-    """Find and lock a user while changing verification state."""
-
+    """Find a user by phone number."""
     statement = (
         select(User)
         .where(User.phone_number == phone_number)
         .with_for_update()
     )
-
     return db.scalar(statement)
 
 
-def _get_verification(
+def _get_verification_by_phone(
     db: Session,
-    user_id,
+    phone_number: str,
 ) -> PhoneVerification | None:
-    """Find the latest verification record and lock it."""
-
+    """Find the latest OTP record for a phone number."""
     statement = (
         select(PhoneVerification)
-        .where(PhoneVerification.user_id == user_id)
+        .where(PhoneVerification.phone_number == phone_number)
         .order_by(PhoneVerification.created_at.desc())
         .with_for_update()
     )
-
     return db.scalars(statement).first()
 
 
 def _issue_otp(
     db: Session,
-    user: User,
+    phone_number: str,
     verification: PhoneVerification | None,
+    user: User | None,
     *,
     is_resend: bool = False,
 ) -> None:
-    """Issue a new OTP while enforcing cooldown and resend limits."""
-
+    """Create and send an OTP while enforcing resend limits."""
     now = datetime.now(timezone.utc)
 
     if verification is None:
         verification = PhoneVerification(
-            user_id=user.id,
+            phone_number=phone_number,
+            user_id=user.id if user else None,
             code_hash="pending",
             expires_at=otp_expiration_time(),
             attempts=0,
@@ -97,81 +94,94 @@ def _issue_otp(
             resend_window_started_at=now,
             last_sent_at=now,
         )
-
         db.add(verification)
 
     else:
+        last_sent_at = verification.last_sent_at
+
+        if verification.used_at is None and last_sent_at is not None:
+            elapsed = (
+                now - last_sent_at.replace(tzinfo=timezone.utc)
+                if last_sent_at.tzinfo is None
+                else now - last_sent_at
+            )
+
+            if elapsed.total_seconds() < OTP_RESEND_COOLDOWN_SECONDS:
+                remaining = max(
+                    1,
+                    OTP_RESEND_COOLDOWN_SECONDS
+                    - int(elapsed.total_seconds()),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "Please wait before requesting another "
+                        f"verification code. Try again in {remaining} seconds."
+                    ),
+                )
+
         if verification.used_at is not None and is_resend:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Request a new verification code first.",
+                detail="This verification code can no longer be resent.",
             )
 
-        # An unused code or a code marked used after failed delivery
-        # must still respect the cooldown and resend limits.
-        seconds_since_last_send = (
-            now - verification.last_sent_at
-        ).total_seconds()
+        window_started_at = verification.resend_window_started_at
 
-        if seconds_since_last_send < OTP_RESEND_COOLDOWN_SECONDS:
-            remaining = max(
-                1,
-                OTP_RESEND_COOLDOWN_SECONDS
-                - int(seconds_since_last_send),
-            )
-
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    f"Please wait {remaining} seconds "
-                    "before requesting another code."
-                ),
-                headers={"Retry-After": str(remaining)},
-            )
-
-        window_age = now - verification.resend_window_started_at
-
-        if window_age >= timedelta(
-            minutes=OTP_RESEND_WINDOW_MINUTES
-        ):
-            verification.resend_count = 0
+        if window_started_at is None:
             verification.resend_window_started_at = now
+            verification.resend_count = 0
+        else:
+            if window_started_at.tzinfo is None:
+                window_started_at = window_started_at.replace(
+                    tzinfo=timezone.utc
+                )
 
-        if verification.resend_count >= MAX_OTP_RESENDS:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    "You have reached the resend limit. "
-                    "Please try again after the 15-minute window."
-                ),
-            )
+            window_elapsed = now - window_started_at
 
-        # Count repeated requests against the same resend limit.
-        verification.resend_count += 1
+            if window_elapsed >= timedelta(
+                minutes=OTP_RESEND_WINDOW_MINUTES
+            ):
+                verification.resend_window_started_at = now
+                verification.resend_count = 0
+
+        if is_resend:
+            if verification.resend_count >= MAX_OTP_RESENDS:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "You have reached the verification-code resend "
+                        "limit. Please try again later."
+                    ),
+                )
+
+            verification.resend_count += 1
+
+        verification.phone_number = phone_number
+        verification.user_id = user.id if user else None
         verification.attempts = 0
         verification.used_at = None
+        verification.verified_at = None
+        verification.registration_completed_at = None
+
         verification.last_sent_at = now
+        verification.expires_at = otp_expiration_time()
 
     code = generate_otp()
-
-    verification.code_hash = hash_otp(user.id, code)
-    verification.expires_at = otp_expiration_time()
-    verification.attempts = 0
-    verification.used_at = None
-    verification.last_sent_at = now
+    verification.code_hash = hash_otp(phone_number, code)
 
     try:
-        db.add(verification)
         db.commit()
-        db.refresh(verification)
-
     except Exception:
         db.rollback()
         raise
 
-    # Never return the OTP through the HTTP response.
-    if not send_verification_sms(user.phone_number, code):
-        # Mark the code unusable but retain resend history.
+    try:
+        sent = send_verification_sms(phone_number, code)
+    except Exception:
+        sent = False
+
+    if not sent:
         verification.used_at = datetime.now(timezone.utc)
 
         try:
@@ -181,60 +191,8 @@ def _issue_otp(
 
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Verification code delivery is unavailable. "
-                "Please try again later."
-            ),
+            detail="Unable to send the verification code. Please try again.",
         )
-
-
-@router.post(
-    "/register",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def register_user(
-    user_data: UserCreate,
-    db: Session = Depends(get_db),
-) -> UserResponse:
-    """Register a new ASAP user."""
-
-    conditions = [User.phone_number == user_data.phone_number]
-
-    if user_data.email:
-        conditions.append(User.email == user_data.email)
-
-    existing_user = db.scalar(
-        select(User).where(or_(*conditions))
-    )
-
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Phone number or email is already registered.",
-        )
-
-    user = User(
-        phone_number=user_data.phone_number,
-        display_name=user_data.display_name,
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
-    )
-
-    try:
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-    except IntegrityError:
-        db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Phone number or email is already registered.",
-        ) from None
-
-    return user
 
 
 @router.post(
@@ -245,23 +203,34 @@ def request_otp(
     request: OTPRequest,
     db: Session = Depends(get_db),
 ) -> OTPResponse:
-    """Request a phone verification code."""
+    """Request an OTP to register or sign in using a phone number."""
+    phone_number = request.phone_number.strip()
+    user = _get_user_by_phone(db, phone_number)
 
-    user = _get_user_by_phone(db, request.phone_number)
+    # Keep the response generic to avoid revealing account information.
+    if user is not None and not user.is_active:
+        return OTPResponse(
+            message=(
+                "If this phone number can receive a verification code, "
+                "a code will be sent."
+            )
+        )
 
-    if user is None or user.phone_verified:
-        return OTPResponse(message=GENERIC_OTP_MESSAGE)
-
-    verification = _get_verification(db, user.id)
+    verification = _get_verification_by_phone(db, phone_number)
 
     _issue_otp(
-        db,
-        user,
-        verification,
-        is_resend=False,
+        db=db,
+        phone_number=phone_number,
+        verification=verification,
+        user=user,
     )
 
-    return OTPResponse(message=GENERIC_OTP_MESSAGE)
+    return OTPResponse(
+        message=(
+            "If this phone number can receive a verification code, "
+            "a code will be sent."
+        )
+    )
 
 
 @router.post(
@@ -272,26 +241,42 @@ def resend_otp(
     request: OTPRequest,
     db: Session = Depends(get_db),
 ) -> OTPResponse:
-    """Resend an existing verification code within the limits."""
+    """Resend an OTP subject to cooldown and rate limits."""
+    phone_number = request.phone_number.strip()
+    user = _get_user_by_phone(db, phone_number)
 
-    user = _get_user_by_phone(db, request.phone_number)
+    if user is not None and not user.is_active:
+        return OTPResponse(
+            message=(
+                "If this phone number can receive a verification code, "
+                "a code will be sent."
+            )
+        )
 
-    if user is None or user.phone_verified:
-        return OTPResponse(message=GENERIC_OTP_MESSAGE)
-
-    verification = _get_verification(db, user.id)
+    verification = _get_verification_by_phone(db, phone_number)
 
     if verification is None or verification.used_at is not None:
-        return OTPResponse(message=GENERIC_OTP_MESSAGE)
+        return OTPResponse(
+            message=(
+                "If this phone number can receive a verification code, "
+                "a code will be sent."
+            )
+        )
 
     _issue_otp(
-        db,
-        user,
-        verification,
+        db=db,
+        phone_number=phone_number,
+        verification=verification,
+        user=user,
         is_resend=True,
     )
 
-    return OTPResponse(message=GENERIC_OTP_MESSAGE)
+    return OTPResponse(
+        message=(
+            "If this phone number can receive a verification code, "
+            "a code will be sent."
+        )
+    )
 
 
 @router.post(
@@ -302,89 +287,201 @@ def verify_otp(
     request: OTPVerificationRequest,
     db: Session = Depends(get_db),
 ) -> OTPVerificationResponse:
-    """Verify a phone number using its six-digit code."""
+    """Verify an OTP and issue the appropriate authentication token."""
+    phone_number = request.phone_number.strip()
 
-    user = _get_user_by_phone(db, request.phone_number)
+    verification = _get_verification_by_phone(db, phone_number)
 
-    if user is None:
+    if verification is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code.",
         )
 
-    if user.phone_verified:
-        return OTPVerificationResponse(
-            verified=True,
-            message="Your phone number is already verified.",
-        )
-
-    verification = _get_verification(db, user.id)
-
-    if verification is None or verification.used_at is not None:
+    if verification.used_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code.",
+            detail="This verification code has already been used.",
         )
 
     now = datetime.now(timezone.utc)
+    expires_at = verification.expires_at
 
-    if verification.expires_at <= now:
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if now >= expires_at:
+        verification.used_at = now
+        db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "This verification code has expired. "
-                "Request a new one."
-            ),
+            detail="Invalid or expired verification code.",
         )
 
     if verification.attempts >= MAX_OTP_ATTEMPTS:
+        verification.used_at = now
+        db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many incorrect attempts. Request a new code.",
+            detail=(
+                "Too many incorrect attempts. "
+                "Please request a new verification code."
+            ),
         )
 
-    valid_code = verify_otp_hash(
-        user.id,
+    if not verify_otp_hash(
+        phone_number,
         request.code,
         verification.code_hash,
-    )
-
-    if not valid_code:
+    ):
         verification.attempts += 1
-        attempts_exhausted = (
-            verification.attempts >= MAX_OTP_ATTEMPTS
-        )
 
-        # Save the attempt before returning an HTTP error.
-        try:
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+        if verification.attempts >= MAX_OTP_ATTEMPTS:
+            verification.used_at = now
 
-        if attempts_exhausted:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many incorrect attempts. Request a new code.",
-            )
+        db.commit()
 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incorrect verification code.",
+            detail="Invalid or expired verification code.",
         )
 
-    user.phone_verified = True
-    verification.used_at = now
+    user = _get_user_by_phone(db, phone_number)
 
-    try:
+    if user is not None and not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is inactive.",
+        )
+
+    verification.used_at = now
+    verification.verified_at = now
+
+    if user is not None:
+        user.phone_verified = True
+
         db.commit()
-    except Exception:
-        db.rollback()
-        raise
+
+        return OTPVerificationResponse(
+            verified=True,
+            message="Phone number verified successfully.",
+            access_token=create_access_token(user.id),
+        )
+
+    db.commit()
 
     return OTPVerificationResponse(
         verified=True,
-        message="Your phone number has been verified successfully.",
+        message="Phone number verified. Continue creating your account.",
+        registration_token=create_registration_token(phone_number),
+    )
+
+
+@router.post(
+    "/register",
+    response_model=RegistrationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+) -> RegistrationResponse:
+    """Create an account using a valid phone-verification token."""
+    try:
+        payload = decode_registration_token(user_data.registration_token)
+    except (jwt.PyJWTError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired registration token.",
+        )
+
+    phone_number = payload.get("sub")
+
+    if not isinstance(phone_number, str) or not phone_number:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid registration token.",
+        )
+
+    verification = _get_verification_by_phone(db, phone_number)
+
+    if (
+        verification is None
+        or verification.verified_at is None
+        or verification.used_at is None
+        or verification.registration_completed_at is not None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone verification is required before registration.",
+        )
+
+    if _get_user_by_phone(db, phone_number) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this phone number already exists.",
+        )
+
+    display_name = user_data.display_name.strip()
+
+    if len(display_name) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Display name must contain at least two characters.",
+        )
+
+    email = (
+        user_data.email.strip().lower()
+        if user_data.email is not None
+        else None
+    )
+
+    if email == "":
+        email = None
+
+    if email is not None:
+        existing_email = db.scalar(
+            select(User).where(User.email == email)
+        )
+
+        if existing_email is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists.",
+            )
+
+    user = User(
+        phone_number=phone_number,
+        display_name=display_name,
+        email=email,
+        password_hash=None,
+        phone_verified=True,
+        is_active=True,
+    )
+
+    verification.registration_completed_at = datetime.now(timezone.utc)
+    verification.user_id = user.id
+
+    db.add(user)
+
+    try:
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "An account with this phone number or email already exists."
+            ),
+        )
+
+    return RegistrationResponse(
+        user=user,
+        access_token=create_access_token(user.id),
     )
 
 
@@ -392,21 +489,23 @@ def verify_otp(
     "/login",
     response_model=TokenResponse,
 )
-def login_user(
-    login_data: UserLogin,
+def login(
+    credentials: UserLogin,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
-    """Authenticate a user and return an access token."""
-
+    """Support legacy password-based accounts."""
+    phone_number = credentials.phone_number.strip()
     user = db.scalar(
-        select(User).where(
-            User.phone_number == login_data.phone_number
-        )
+        select(User).where(User.phone_number == phone_number)
     )
 
-    if user is None or not verify_password(
-        login_data.password,
-        user.password_hash,
+    if (
+        user is None
+        or user.password_hash is None
+        or not verify_password(
+            credentials.password,
+            user.password_hash,
+        )
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -419,9 +518,9 @@ def login_user(
             detail="This account is inactive.",
         )
 
-    access_token = create_access_token(user.id)
-
-    return TokenResponse(access_token=access_token)
+    return TokenResponse(
+        access_token=create_access_token(user.id),
+    )
 
 
 @router.get(
@@ -432,5 +531,4 @@ def get_my_profile(
     current_user: User = Depends(get_current_user),
 ) -> UserResponse:
     """Return the profile of the authenticated user."""
-
     return current_user

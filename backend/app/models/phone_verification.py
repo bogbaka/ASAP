@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Uuid,
@@ -15,7 +16,7 @@ from app.db.base import Base
 
 
 class PhoneVerification(Base):
-    """Database model for phone number verification codes."""
+    """Store OTP verification state for a phone number."""
 
     __tablename__ = "phone_verifications"
 
@@ -25,10 +26,15 @@ class PhoneVerification(Base):
         default=uuid.uuid4,
     )
 
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    phone_number: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
 
@@ -47,7 +53,6 @@ class PhoneVerification(Base):
         default=0,
         nullable=False,
     )
-
 
     resend_count: Mapped[int] = mapped_column(
         Integer,
@@ -73,8 +78,25 @@ class PhoneVerification(Base):
         nullable=True,
     )
 
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    registration_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_phone_verifications_phone_number",
+            "phone_number",
+        ),
     )
