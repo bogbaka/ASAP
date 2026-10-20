@@ -1,5 +1,7 @@
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 
+import '../database/database_connection.dart';
 import 'conversation_screen.dart';
 import 'account_settings_screen.dart';
 
@@ -26,6 +28,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   final Set<String> _favoriteNames = {};
   final Set<String> _archivedNames = {};
+
+  // Saved conversation activity, used to put recently active chats first.
+  // Chats that have never been saved keep their original sample order.
+  final Map<String, DateTime> _conversationActivityTimes = {};
 
   // Each custom list stores the names of its selected conversations.
   final Map<String, Set<String>> _customLists = {};
@@ -123,17 +129,119 @@ class _ChatsScreenState extends State<ChatsScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _refreshConversationPreviews();
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
   }
 
-  // Apply search and the selected chat filter.
+  // Refresh chat-list previews from the local Drift database.
+  // Sample previews remain visible for conversations that have never been saved.
+  Future<void> _refreshConversationPreviews() async {
+    try {
+      final savedConversations =
+          await appDatabase.select(appDatabase.conversations).get();
+      _conversationActivityTimes
+        ..clear()
+        ..addEntries(
+          savedConversations.map(
+            (item) => MapEntry(item.id, item.updatedAt),
+          ),
+        );
+      final savedIds = savedConversations.map((item) => item.id).toSet();
+
+      for (final conversation in _conversations) {
+        final conversationId = conversation.name.trim().toLowerCase();
+
+        if (!savedIds.contains(conversationId)) {
+          continue;
+        }
+
+        final latestMessages = await (appDatabase.select(appDatabase.messages)
+              ..where((message) =>
+                  message.conversationId.equals(conversationId))
+              ..orderBy([
+                (message) => OrderingTerm.desc(message.sentAt),
+                (message) => OrderingTerm.desc(message.id),
+              ])
+              ..limit(1))
+            .get();
+
+        if (latestMessages.isEmpty) {
+          // The conversation exists, but its messages were cleared.
+          conversation.message = '';
+          conversation.time = '';
+          continue;
+        }
+
+        final latest = latestMessages.first;
+        conversation.message = latest.isOutgoing
+            ? 'You: ${latest.content}'
+            : latest.content;
+        conversation.time = _formatConversationTime(latest.sentAt);
+      }
+
+      if (mounted) setState(() {});
+    } catch (error) {
+      // Keep the screen usable if local storage is temporarily unavailable.
+      debugPrint('Unable to refresh chat previews: $error');
+    }
+  }
+
+  String _formatConversationTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDay = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    final difference = today.difference(messageDay).inDays;
+
+    if (difference == 0) {
+      return TimeOfDay.fromDateTime(dateTime).format(context);
+    }
+    if (difference == 1) return 'Yesterday';
+    if (difference >= 2 && difference < 7) {
+      const weekdays = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return weekdays[dateTime.weekday - 1];
+    }
+
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+  }
+
+  // Compare saved chats by their persisted last-activity timestamp.
+  // Saved chats come before demo chats that have never been persisted.
+  int _compareConversationActivity(
+    ChatConversation first,
+    ChatConversation second,
+  ) {
+    final firstId = first.name.trim().toLowerCase();
+    final secondId = second.name.trim().toLowerCase();
+    final firstActivity = _conversationActivityTimes[firstId];
+    final secondActivity = _conversationActivityTimes[secondId];
+
+    if (firstActivity == null && secondActivity == null) return 0;
+    if (firstActivity == null) return 1;
+    if (secondActivity == null) return -1;
+    return secondActivity.compareTo(firstActivity);
+  }
+
+  // Apply search and the selected chat filter, newest activity first.
   List<ChatConversation> get _filteredConversations {
     final query = _searchQuery.trim().toLowerCase();
 
-    return _conversations.where((conversation) {
+    final filtered = _conversations.where((conversation) {
       if (_archivedNames.contains(conversation.name)) {
         return false;
       }
@@ -168,12 +276,41 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
       return true;
     }).toList();
+
+    // Use the initial list position as a tie-breaker so demo chats with no
+    // database record remain in their existing order.
+    final originalPositions = <String, int>{
+      for (var index = 0; index < _conversations.length; index++)
+        _conversations[index].name: index,
+    };
+    filtered.sort((first, second) {
+      final activityComparison =
+          _compareConversationActivity(first, second);
+      if (activityComparison != 0) return activityComparison;
+      return originalPositions[first.name]!.compareTo(
+        originalPositions[second.name]!,
+      );
+    });
+    return filtered;
   }
 
   List<ChatConversation> get _archivedConversations {
-    return _conversations
+    final archived = _conversations
         .where((conversation) => _archivedNames.contains(conversation.name))
         .toList();
+    final originalPositions = <String, int>{
+      for (var index = 0; index < _conversations.length; index++)
+        _conversations[index].name: index,
+    };
+    archived.sort((first, second) {
+      final activityComparison =
+          _compareConversationActivity(first, second);
+      if (activityComparison != 0) return activityComparison;
+      return originalPositions[first.name]!.compareTo(
+        originalPositions[second.name]!,
+      );
+    });
+    return archived;
   }
 
   void _showMessage(String message) {
@@ -211,9 +348,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  // Open a conversation.
-  void _openConversation(ChatConversation conversation) {
-    Navigator.push<void>(
+  // Open a conversation and refresh its preview when the user returns.
+  Future<void> _openConversation(ChatConversation conversation) async {
+    await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (context) => ConversationScreen(
@@ -224,6 +361,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
         ),
       ),
     );
+
+    if (mounted) await _refreshConversationPreviews();
   }
 
   // Favorite or unfavorite a conversation.
@@ -1770,8 +1909,8 @@ class ChatConversation {
   final String name;
   final String initials;
   final Color avatarColor;
-  final String message;
-  final String time;
+  String message;
+  String time;
   int unreadCount;
   final bool isOnline;
   final bool isGroup;

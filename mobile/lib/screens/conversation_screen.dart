@@ -1,4 +1,8 @@
+import 'package:drift/drift.dart' show OrderingTerm, Value;
 import 'package:flutter/material.dart';
+
+import '../database/app_database.dart';
+import '../database/database_connection.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String contactName;
@@ -23,8 +27,7 @@ class ConversationScreen extends StatefulWidget {
   });
 
   @override
-  State<ConversationScreen> createState() =>
-      _ConversationScreenState();
+  State<ConversationScreen> createState() => _ConversationScreenState();
 }
 
 class _ConversationScreenState extends State<ConversationScreen> {
@@ -35,20 +38,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
   static const Color _incomingBubble = Colors.white;
   static const Color _outgoingBubble = Color(0xFFD9FDD3);
 
-  final TextEditingController _messageController =
-      TextEditingController();
-
+  final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final List<ChatMessage> _messages = [];
 
-  late final List<ChatMessage> _messages;
+  late final String _conversationId;
+
+  bool _isLoadingMessages = true;
   bool _isMuted = false;
   bool _isBlocked = false;
 
   @override
   void initState() {
     super.initState();
-    _messages = _createSampleMessages();
+    _conversationId = widget.contactName.trim().toLowerCase();
     _messageController.text = widget.initialReply ?? '';
+    _loadConversation();
   }
 
   @override
@@ -60,28 +65,28 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   List<ChatMessage> _createSampleMessages() {
     return [
-      ChatMessage(
+      const ChatMessage(
         text: 'Hey! How are you doing?',
         time: '09:15',
         isOutgoing: false,
       ),
-      ChatMessage(
+      const ChatMessage(
         text: "I'm fine, thank you! 😊",
         time: '09:16',
         isOutgoing: true,
         isRead: true,
       ),
-      ChatMessage(
+      const ChatMessage(
         text: 'That is great!',
         time: '09:16',
         isOutgoing: false,
       ),
-      ChatMessage(
+      const ChatMessage(
         text: 'How is your ASAP project going?',
         time: '09:17',
         isOutgoing: false,
       ),
-      ChatMessage(
+      const ChatMessage(
         text: 'It is coming along nicely. 🚀',
         time: '09:18',
         isOutgoing: true,
@@ -90,32 +95,158 @@ class _ConversationScreenState extends State<ConversationScreen> {
     ];
   }
 
-  void _sendMessage() {
-    final String text = _messageController.text.trim();
+  Future<void> _loadConversation() async {
+    try {
+      final existingConversation = await (appDatabase.select(
+        appDatabase.conversations,
+      )..where((table) => table.id.equals(_conversationId))).getSingleOrNull();
+
+      final isNewConversation = existingConversation == null;
+
+      if (isNewConversation) {
+        await appDatabase
+            .into(appDatabase.conversations)
+            .insert(
+              ConversationsCompanion.insert(
+                id: _conversationId,
+                contactName: widget.contactName,
+              ),
+            );
+
+        // Create demonstration messages only for a new conversation.
+        final samples = _createSampleMessages();
+        final now = DateTime.now();
+
+        for (var index = 0; index < samples.length; index++) {
+          final sample = samples[index];
+          final sentAt = now.subtract(
+            Duration(minutes: samples.length - index),
+          );
+
+          await appDatabase
+              .into(appDatabase.messages)
+              .insert(
+                MessagesCompanion.insert(
+                  conversationId: _conversationId,
+                  content: sample.text,
+                  isOutgoing: sample.isOutgoing,
+                  isRead: Value(sample.isRead),
+                  sentAt: Value(sentAt),
+                ),
+              );
+        }
+
+        if (samples.isNotEmpty) {
+          await (appDatabase.update(
+            appDatabase.conversations,
+          )..where((table) => table.id.equals(_conversationId))).write(
+            ConversationsCompanion(
+              lastMessage: Value(samples.last.text),
+              updatedAt: Value(now),
+            ),
+          );
+        }
+      }
+
+      final savedMessages =
+          await (appDatabase.select(appDatabase.messages)
+                ..where((table) => table.conversationId.equals(_conversationId))
+                ..orderBy([
+                  (table) => OrderingTerm.asc(table.sentAt),
+                  (table) => OrderingTerm.asc(table.id),
+                ]))
+              .get();
+
+      if (!mounted) return;
+
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(
+            savedMessages.map(
+              (message) => ChatMessage(
+                text: message.content,
+                time: TimeOfDay.fromDateTime(message.sentAt).format(context),
+                isOutgoing: message.isOutgoing,
+                isRead: message.isRead,
+              ),
+            ),
+          );
+
+        _isLoadingMessages = false;
+      });
+
+      _scrollToLatestMessage();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to load conversation: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+
+      setState(() => _isLoadingMessages = false);
+
+      _showDemoMessage(
+        'Unable to load messages. Please try reopening this conversation.',
+      );
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
 
     if (text.isEmpty) return;
+
+    if (_isLoadingMessages) {
+      _showDemoMessage('Please wait for the conversation to load.');
+      return;
+    }
 
     if (_isBlocked) {
       _showDemoMessage('Unblock this contact before sending a message.');
       return;
     }
 
-    final now = TimeOfDay.now();
-    final String formattedTime = now.format(context);
+    final now = DateTime.now();
+    final formattedTime = TimeOfDay.fromDateTime(now).format(context);
 
-    setState(() {
-      _messages.add(
-        ChatMessage(
-          text: text,
-          time: formattedTime,
-          isOutgoing: true,
-          isRead: false,
-        ),
+    try {
+      // Save the message before displaying it as sent.
+      await appDatabase
+          .into(appDatabase.messages)
+          .insert(
+            MessagesCompanion.insert(
+              conversationId: _conversationId,
+              content: text,
+              isOutgoing: true,
+              sentAt: Value(now),
+            ),
+          );
+
+      // Keep the conversation's last-message preview up to date.
+      await (appDatabase.update(
+        appDatabase.conversations,
+      )..where((table) => table.id.equals(_conversationId))).write(
+        ConversationsCompanion(lastMessage: Value(text), updatedAt: Value(now)),
       );
-    });
 
-    _messageController.clear();
-    _scrollToLatestMessage();
+      if (!mounted) return;
+
+      setState(() {
+        _messages.add(
+          ChatMessage(text: text, time: formattedTime, isOutgoing: true),
+        );
+      });
+
+      _messageController.clear();
+      _scrollToLatestMessage();
+    } catch (error, stackTrace) {
+      debugPrint('Failed to save message: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+
+      _showDemoMessage('Message could not be saved. Please try again.');
+    }
   }
 
   void _scrollToLatestMessage() {
@@ -134,10 +265,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
@@ -200,6 +328,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   void _searchConversation() {
     final controller = TextEditingController();
+
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -236,16 +365,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   void _findMessage(String query) {
     final term = query.trim().toLowerCase();
+
     if (term.isEmpty) {
       _showDemoMessage('Enter a word or phrase to search.');
       return;
     }
+
     final count = _messages
         .where((message) => message.text.toLowerCase().contains(term))
         .length;
-    _showDemoMessage(count == 0
-        ? 'No matching messages found.'
-        : 'Found $count matching message(s).');
+
+    _showDemoMessage(
+      count == 0
+          ? 'No matching messages found.'
+          : 'Found $count matching message(s).',
+    );
   }
 
   void _confirmClearConversation() {
@@ -254,7 +388,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Clear conversation?'),
         content: const Text(
-          'This clears the messages shown in this demo. It cannot be undone.',
+          'This clears the messages in this conversation. It cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -262,16 +396,44 @@ class _ConversationScreenState extends State<ConversationScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(dialogContext);
-              setState(_messages.clear);
-              _showDemoMessage('Conversation cleared.');
+              await _clearConversation();
             },
             child: const Text('Clear'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _clearConversation() async {
+    try {
+      await (appDatabase.delete(
+        appDatabase.messages,
+      )..where((table) => table.conversationId.equals(_conversationId))).go();
+
+      await (appDatabase.update(
+        appDatabase.conversations,
+      )..where((table) => table.id.equals(_conversationId))).write(
+        ConversationsCompanion(
+          lastMessage: const Value(''),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
+      if (!mounted) return;
+
+      setState(_messages.clear);
+      _showDemoMessage('Conversation cleared.');
+    } catch (error, stackTrace) {
+      debugPrint('Failed to clear conversation: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+
+      _showDemoMessage('Unable to clear this conversation. Please try again.');
+    }
   }
 
   void _confirmReportContact() {
@@ -298,9 +460,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(_isBlocked ? 'Unblock contact?' : 'Block contact?'),
-        content: Text(_isBlocked
-            ? 'Allow ${widget.contactName} to message you in this demo?'
-            : 'Block ${widget.contactName} in this demo?'),
+        content: Text(
+          _isBlocked
+              ? 'Allow ${widget.contactName} to message you in this demo?'
+              : 'Block ${widget.contactName} in this demo?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
@@ -310,9 +474,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
             onPressed: () {
               Navigator.pop(dialogContext);
               setState(() => _isBlocked = !_isBlocked);
-              _showDemoMessage(_isBlocked
-                  ? '${widget.contactName} blocked in this demo.'
-                  : '${widget.contactName} unblocked.');
+              _showDemoMessage(
+                _isBlocked
+                    ? '${widget.contactName} blocked in this demo.'
+                    : '${widget.contactName} unblocked.',
+              );
             },
             child: Text(_isBlocked ? 'Unblock' : 'Block'),
           ),
@@ -388,10 +554,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 'Voice calling will be available in a future update.',
               );
             },
-            icon: const Icon(
-              Icons.call_outlined,
-              color: _primaryColor,
-            ),
+            icon: const Icon(Icons.call_outlined, color: _primaryColor),
           ),
           IconButton(
             tooltip: 'Video call',
@@ -400,10 +563,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 'Video calling will be available in a future update.',
               );
             },
-            icon: const Icon(
-              Icons.videocam_outlined,
-              color: _primaryColor,
-            ),
+            icon: const Icon(Icons.videocam_outlined, color: _primaryColor),
           ),
           PopupMenuButton<String>(
             tooltip: 'More options',
@@ -464,9 +624,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     _isBlocked ? Icons.lock_open : Icons.block,
                     color: _isBlocked ? Colors.green : Colors.red,
                   ),
-                  title: Text(
-                    _isBlocked ? 'Unblock contact' : 'Block contact',
-                  ),
+                  title: Text(_isBlocked ? 'Unblock contact' : 'Block contact'),
                 ),
               ),
             ],
@@ -478,23 +636,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
         child: Column(
           children: [
             Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 18,
-                ),
-                itemCount: _messages.length + 1,
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return _buildDateLabel();
-                  }
-
-                  final message = _messages[index - 1];
-
-                  return _buildMessageBubble(message);
-                },
-              ),
+              child: _isLoadingMessages
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 18,
+                      ),
+                      itemCount: _messages.length + 1,
+                      itemBuilder: (context, index) {
+                        if (index == 0) return _buildDateLabel();
+                        return _buildMessageBubble(_messages[index - 1]);
+                      },
+                    ),
             ),
             if (widget.repliedStatusText != null)
               Container(
@@ -504,8 +659,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Replying to status', style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor)),
-                    Text(widget.repliedStatusText!, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const Text(
+                      'Replying to status',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _primaryColor,
+                      ),
+                    ),
+                    Text(
+                      widget.repliedStatusText!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -520,10 +685,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     return Center(
       child: Container(
         margin: const EdgeInsets.only(bottom: 20),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 7,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: const Color(0xFFFFF8C6),
           borderRadius: BorderRadius.circular(8),
@@ -542,12 +704,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Widget _buildMessageBubble(ChatMessage message) {
-    final bool isOutgoing = message.isOutgoing;
+    final isOutgoing = message.isOutgoing;
 
     return Align(
-      alignment: isOutgoing
-          ? Alignment.centerRight
-          : Alignment.centerLeft,
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.sizeOf(context).width * 0.78,
@@ -587,10 +747,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               children: [
                 Text(
                   message.time,
-                  style: const TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 10,
-                  ),
+                  style: const TextStyle(color: _secondaryColor, fontSize: 10),
                 ),
                 if (isOutgoing) ...[
                   const SizedBox(width: 4),
@@ -635,9 +792,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: const Color(0xFFE0E0E0),
-                ),
+                border: Border.all(color: const Color(0xFFE0E0E0)),
               ),
               child: TextField(
                 controller: _messageController,
@@ -648,10 +803,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 textInputAction: TextInputAction.newline,
                 decoration: const InputDecoration(
                   hintText: 'Message',
-                  hintStyle: TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 14,
-                  ),
+                  hintStyle: TextStyle(color: _secondaryColor, fontSize: 14),
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.symmetric(
                     horizontal: 18,
@@ -668,11 +820,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             child: IconButton(
               tooltip: 'Send message',
               onPressed: _sendMessage,
-              icon: const Icon(
-                Icons.send,
-                color: Colors.white,
-                size: 21,
-              ),
+              icon: const Icon(Icons.send, color: Colors.white, size: 21),
             ),
           ),
         ],
@@ -680,7 +828,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 }
-
 
 class _ContactInfoScreen extends StatefulWidget {
   final String contactName;
@@ -715,6 +862,7 @@ class _ContactInfoScreenState extends State<_ContactInfoScreen> {
   static const Color _primaryColor = Color(0xFF075E54);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
+
   late bool _isMuted;
 
   @override
@@ -781,17 +929,19 @@ class _ContactInfoScreenState extends State<_ContactInfoScreen> {
               ListTile(
                 leading: const Icon(Icons.phone_outlined, color: _primaryColor),
                 title: const Text('Phone number'),
-                subtitle: Text(phone == null || phone.isEmpty
-                    ? 'Not provided'
-                    : phone),
+                subtitle: Text(
+                  phone == null || phone.isEmpty ? 'Not provided' : phone,
+                ),
               ),
               const Divider(height: 1, indent: 72),
               ListTile(
                 leading: const Icon(Icons.info_outline, color: _primaryColor),
                 title: const Text('About'),
-                subtitle: Text(about == null || about.isEmpty
-                    ? 'No about information added'
-                    : about),
+                subtitle: Text(
+                  about == null || about.isEmpty
+                      ? 'No about information added'
+                      : about,
+                ),
               ),
             ],
           ),
@@ -800,7 +950,10 @@ class _ContactInfoScreenState extends State<_ContactInfoScreen> {
             title: 'Media, links and documents',
             children: [
               ListTile(
-                leading: const Icon(Icons.photo_library_outlined, color: _primaryColor),
+                leading: const Icon(
+                  Icons.photo_library_outlined,
+                  color: _primaryColor,
+                ),
                 title: const Text('Media'),
                 trailing: const Text('0'),
                 onTap: () => _showEmptyContent(context, 'Media'),
@@ -814,7 +967,10 @@ class _ContactInfoScreenState extends State<_ContactInfoScreen> {
               ),
               const Divider(height: 1, indent: 72),
               ListTile(
-                leading: const Icon(Icons.insert_drive_file_outlined, color: _primaryColor),
+                leading: const Icon(
+                  Icons.insert_drive_file_outlined,
+                  color: _primaryColor,
+                ),
                 title: const Text('Documents'),
                 trailing: const Text('0'),
                 onTap: () => _showEmptyContent(context, 'Documents'),
@@ -826,7 +982,10 @@ class _ContactInfoScreenState extends State<_ContactInfoScreen> {
             title: 'Settings',
             children: [
               SwitchListTile(
-                secondary: const Icon(Icons.notifications_off_outlined, color: _primaryColor),
+                secondary: const Icon(
+                  Icons.notifications_off_outlined,
+                  color: _primaryColor,
+                ),
                 title: const Text('Mute notifications'),
                 value: _isMuted,
                 activeThumbColor: _primaryColor,
