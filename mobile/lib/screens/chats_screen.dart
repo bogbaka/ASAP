@@ -1,7 +1,8 @@
-import 'package:drift/drift.dart' show OrderingTerm;
+import 'package:drift/drift.dart' show InsertMode, OrderingTerm, Value;
 import 'package:flutter/material.dart';
 
 import '../database/database_connection.dart';
+import '../database/app_database.dart';
 import 'conversation_screen.dart';
 import 'account_settings_screen.dart';
 
@@ -162,6 +163,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
         if (!savedIds.contains(conversationId)) {
           continue;
         }
+
+        final allConversationMessages = await (
+            appDatabase.select(appDatabase.messages)
+              ..where((message) =>
+                  message.conversationId.equals(conversationId)))
+          .get();
+        final unreadMessages = allConversationMessages
+            .where((message) => !message.isOutgoing && !message.isRead)
+            .toList();
+        conversation.unreadCount = unreadMessages.length;
 
         final latestMessages = await (appDatabase.select(appDatabase.messages)
               ..where((message) =>
@@ -348,8 +359,38 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  // Open a conversation and refresh its preview when the user returns.
+  // Opening a chat marks incoming messages as read and persists that state.
   Future<void> _openConversation(ChatConversation conversation) async {
+    final conversationId = conversation.name.trim().toLowerCase();
+
+    // Clear the visible badge immediately, before opening the conversation.
+    if (mounted) {
+      setState(() => conversation.unreadCount = 0);
+    }
+
+    try {
+      // Create a local conversation record if this is still a sample chat.
+      // insertOrIgnore preserves the existing preview and activity timestamp.
+      await appDatabase.into(appDatabase.conversations).insert(
+            ConversationsCompanion(
+              id: Value(conversationId),
+              contactName: Value(conversation.name),
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+
+      await (appDatabase.update(appDatabase.messages)
+            ..where((message) =>
+                message.conversationId.equals(conversationId)))
+          .write(const MessagesCompanion(isRead: Value(true)));
+    } catch (error) {
+      debugPrint('Unable to mark conversation as read: $error');
+    }
+
+    if (!mounted) return;
+
+    if (!mounted) return;
+
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
