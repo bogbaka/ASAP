@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../services/auth_service.dart';
 import 'chats_screen.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   final String phoneNumber;
+  final String registrationToken;
 
   const ProfileSetupScreen({
     super.key,
     required this.phoneNumber,
+    required this.registrationToken,
   });
 
   @override
@@ -18,6 +21,8 @@ class ProfileSetupScreen extends StatefulWidget {
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final TextEditingController _nameController =
       TextEditingController();
+
+  final AuthService _authService = AuthService();
 
   static const Color _primaryColor = Color(0xFF075E54);
   static const Color _backgroundColor = Color(0xFFF7F9F8);
@@ -30,11 +35,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _authService.dispose();
     super.dispose();
   }
 
   // Displays a message at the bottom of the screen.
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -45,8 +53,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       );
   }
 
-  // Validates the display name and opens the Chats screen.
+  // Registers the user through the backend.
   Future<void> _continue() async {
+    if (_isSaving) return;
+
     final String displayName = _nameController.text.trim();
 
     if (displayName.isEmpty) {
@@ -72,27 +82,65 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _isSaving = true;
     });
 
-    // Temporary demo delay.
-    // Profile data will be saved through the backend later.
-    await Future.delayed(
-      const Duration(milliseconds: 500),
-    );
+    try {
+      final response = await _authService.register(
+        registrationToken: widget.registrationToken,
+        displayName: displayName,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _isSaving = false;
-    });
+      final accessToken = response['access_token'];
+      final user = response['user'];
 
-    // Navigate to Chats after profile setup.
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatsScreen(
-          displayName: displayName,
+      if (accessToken is! String ||
+          accessToken.isEmpty ||
+          user is! Map<String, dynamic>) {
+        _showMessage(
+          'Registration succeeded, but the server returned an unexpected response.',
+        );
+        return;
+      }
+
+      final registeredName = user['display_name'];
+
+      if (registeredName is! String ||
+          registeredName.trim().isEmpty) {
+        _showMessage(
+          'Your profile could not be loaded. Please try again.',
+        );
+        return;
+      }
+
+      // Store the access token securely before opening Chats.
+      await _authService.saveAccessToken(accessToken);
+
+      if (!mounted) return;
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatsScreen(
+            displayName: registeredName,
+          ),
         ),
-      ),
-    );
+        (route) => false,
+      );
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on FormatException catch (error) {
+      _showMessage(error.message);
+    } catch (_) {
+      _showMessage(
+        'Something went wrong while creating your account. Please try again.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   @override

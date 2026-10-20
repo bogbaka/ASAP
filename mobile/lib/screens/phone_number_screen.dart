@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../services/auth_service.dart';
 import 'verification_screen.dart';
 
 class PhoneNumberScreen extends StatefulWidget {
@@ -13,6 +15,8 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
   final TextEditingController _phoneController =
       TextEditingController();
 
+  final AuthService _authService = AuthService();
+
   String _countryCode = '+234';
 
   bool _isContinuing = false;
@@ -20,10 +24,11 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
   @override
   void dispose() {
     _phoneController.dispose();
+    _authService.dispose();
     super.dispose();
   }
 
-  // Validates the phone number and opens the verification screen.
+  // Validates the phone number and requests an OTP from the backend.
   Future<void> _continue() async {
     if (_isContinuing) return;
 
@@ -40,32 +45,73 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
       return;
     }
 
-    final fullPhoneNumber = '$_countryCode $phoneNumber';
+    // Nigerian local numbers commonly start with 0.
+    // Remove that trunk prefix before adding +234.
+    var nationalNumber = phoneNumber;
+
+    if (_countryCode == '+234' &&
+        nationalNumber.startsWith('0')) {
+      nationalNumber = nationalNumber.substring(1);
+    }
+
+    // Send the international number without spaces.
+    final fullPhoneNumber = '$_countryCode$nationalNumber';
 
     setState(() {
       _isContinuing = true;
     });
 
-    // Small delay to provide visual feedback.
-    await Future.delayed(const Duration(milliseconds: 300));
+    try {
+      await _authService.requestOtp(
+        phoneNumber: fullPhoneNumber,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _isContinuing = false;
-    });
+      setState(() {
+        _isContinuing = false;
+      });
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => VerificationScreen(
-          phoneNumber: fullPhoneNumber,
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => VerificationScreen(
+            phoneNumber: fullPhoneNumber,
+          ),
         ),
-      ),
-    );
+      );
+    } on AuthException catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _isContinuing = false;
+      });
+
+      _showMessage(error.message);
+    } on FormatException {
+      if (!mounted) return;
+
+      setState(() {
+        _isContinuing = false;
+      });
+
+      _showMessage(
+        'The server returned an unexpected response. Please try again.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _isContinuing = false;
+      });
+
+      _showMessage(
+        'Could not connect to the server. Please try again.',
+      );
+    }
   }
 
-  // Displays validation messages.
+  // Displays messages to the user.
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -198,13 +244,15 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                               child: Text('🇮🇳 +91'),
                             ),
                           ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() {
-                                _countryCode = value;
-                              });
-                            }
-                          },
+                          onChanged: _isContinuing
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() {
+                                      _countryCode = value;
+                                    });
+                                  }
+                                },
                         ),
                       ),
                     ),
@@ -218,6 +266,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                         keyboardType: TextInputType.phone,
                         textInputAction: TextInputAction.done,
                         maxLength: 15,
+                        enabled: !_isContinuing,
                         onSubmitted: (_) => _continue(),
                         decoration: InputDecoration(
                           counterText: '',
@@ -286,8 +335,8 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                       Expanded(
                         child: Text(
                           'Your phone number helps people identify '
-                          'your account. Verification will be '
-                          'connected to the ASAP backend later.',
+                          'your account. ASAP uses phone verification '
+                          'to help secure your account.',
                           style: TextStyle(
                             fontSize: 12,
                             height: 1.5,

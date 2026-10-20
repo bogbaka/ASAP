@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../services/auth_service.dart';
+import 'chats_screen.dart';
 import 'profile_setup_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
@@ -21,6 +24,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   final FocusNode _codeFocusNode = FocusNode();
 
+  final AuthService _authService = AuthService();
+
   bool _isVerifying = false;
   bool _isResending = false;
 
@@ -34,11 +39,14 @@ class _VerificationScreenState extends State<VerificationScreen> {
   void dispose() {
     _codeController.dispose();
     _codeFocusNode.dispose();
+    _authService.dispose();
     super.dispose();
   }
 
   // Displays a message at the bottom of the screen.
   void _showMessage(String message) {
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -49,8 +57,10 @@ class _VerificationScreenState extends State<VerificationScreen> {
       );
   }
 
-  // Validates the code and navigates to Profile Setup.
+  // Verifies the code using the backend.
   Future<void> _verifyCode() async {
+    if (_isVerifying || _isResending) return;
+
     final String code = _codeController.text.trim();
 
     if (!RegExp(r'^[0-9]{6}$').hasMatch(code)) {
@@ -62,29 +72,100 @@ class _VerificationScreenState extends State<VerificationScreen> {
       _isVerifying = true;
     });
 
-    // Temporary demo verification.
-    // Real code verification will be handled by the backend.
-    await Future.delayed(
-      const Duration(milliseconds: 500),
-    );
+    try {
+      final response = await _authService.verifyOtp(
+        phoneNumber: widget.phoneNumber,
+        code: code,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _isVerifying = false;
-    });
+      if (response['verified'] != true) {
+        final message = response['message'] is String
+            ? response['message'] as String
+            : 'Verification failed. Please try again.';
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ProfileSetupScreen(
-          phoneNumber: widget.phoneNumber,
-        ),
-      ),
-    );
+        _showMessage(message);
+        return;
+      }
+
+      // New users receive a registration token.
+      final registrationToken = response['registration_token'];
+
+      if (registrationToken is String &&
+          registrationToken.isNotEmpty) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProfileSetupScreen(
+              phoneNumber: widget.phoneNumber,
+              registrationToken: registrationToken,
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // Existing users receive an access token.
+      final accessToken = response['access_token'];
+
+      if (accessToken is String && accessToken.isNotEmpty) {
+        // Save the session before opening Chats.
+        await _authService.saveAccessToken(accessToken);
+
+        if (!mounted) return;
+
+        // Retrieve the authenticated user's profile.
+        final profile = await _authService.getMyProfile(
+          accessToken: accessToken,
+        );
+
+        if (!mounted) return;
+
+        final displayName = profile['display_name'];
+
+        if (displayName is! String ||
+            displayName.trim().isEmpty) {
+          _showMessage(
+            'Your profile could not be loaded. Please try again.',
+          );
+          return;
+        }
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatsScreen(
+              displayName: displayName,
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      _showMessage(
+        'The server returned an unexpected verification response.',
+      );
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on FormatException catch (error) {
+      _showMessage(error.message);
+    } catch (_) {
+      _showMessage(
+        'Something went wrong. Please try again.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVerifying = false;
+        });
+      }
+    }
   }
 
-  // Temporary resend-code placeholder.
+  // Requests another verification code from the backend.
   Future<void> _resendCode() async {
     if (_isResending || _isVerifying) return;
 
@@ -92,23 +173,41 @@ class _VerificationScreenState extends State<VerificationScreen> {
       _isResending = true;
     });
 
-    await Future.delayed(
-      const Duration(milliseconds: 500),
-    );
+    try {
+      final response = await _authService.resendOtp(
+        phoneNumber: widget.phoneNumber,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _isResending = false;
-    });
+      final message = response['message'];
 
-    _showMessage(
-      'SMS delivery will be available after backend integration.',
-    );
+      _showMessage(
+        message is String
+            ? message
+            : 'If this phone number can receive a verification code, a code will be sent.',
+      );
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on FormatException catch (error) {
+      _showMessage(error.message);
+    } catch (_) {
+      _showMessage(
+        'Could not request another code. Please try again.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResending = false;
+        });
+      }
+    }
   }
 
   // Returns the user to the previous screen.
   void _changePhoneNumber() {
+    if (_isVerifying || _isResending) return;
+
     Navigator.pop(context);
   }
 
@@ -120,9 +219,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
         backgroundColor: _backgroundColor,
         elevation: 0,
         leading: IconButton(
-          onPressed: _isVerifying
+          onPressed: (_isVerifying || _isResending)
               ? null
-              : () => Navigator.pop(context),
+              : _changePhoneNumber,
           icon: const Icon(Icons.arrow_back),
           color: _headingColor,
         ),
@@ -225,7 +324,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         ),
                       ),
                       TextButton(
-                        onPressed: _isVerifying
+                        onPressed: (_isVerifying || _isResending)
                             ? null
                             : _changePhoneNumber,
                         child: const Text(
@@ -258,9 +357,13 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 TextField(
                   controller: _codeController,
                   focusNode: _codeFocusNode,
-                  enabled: !_isVerifying,
+                  enabled: !_isVerifying && !_isResending,
                   keyboardType: TextInputType.number,
                   textInputAction: TextInputAction.done,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
                   maxLength: 6,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
@@ -305,7 +408,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     ),
                   ),
                   onSubmitted: (_) {
-                    if (!_isVerifying) {
+                    if (!_isVerifying && !_isResending) {
                       _verifyCode();
                     }
                   },
@@ -313,7 +416,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
                 const SizedBox(height: 12),
 
-                // Demo information.
+                // Backend verification information.
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -335,9 +438,10 @@ class _VerificationScreenState extends State<VerificationScreen> {
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Demo mode: enter any 6-digit number. '
-                          'Actual SMS verification will be '
-                          'connected to the backend later.',
+                          'Enter the code sent by the verification '
+                          'service. During local development, '
+                          'check the backend terminal if the '
+                          'development sender prints the code there.',
                           style: TextStyle(
                             color: _secondaryColor,
                             fontSize: 13,
@@ -355,7 +459,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 SizedBox(
                   height: 54,
                   child: ElevatedButton(
-                    onPressed: _isVerifying
+                    onPressed: (_isVerifying || _isResending)
                         ? null
                         : _verifyCode,
                     style: ElevatedButton.styleFrom(
@@ -406,16 +510,14 @@ class _VerificationScreenState extends State<VerificationScreen> {
                       ),
                     ),
                     TextButton(
-                      onPressed:
-                          (_isResending || _isVerifying)
-                              ? null
-                              : _resendCode,
+                      onPressed: (_isResending || _isVerifying)
+                          ? null
+                          : _resendCode,
                       child: _isResending
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child:
-                                  CircularProgressIndicator(
+                              child: CircularProgressIndicator(
                                 strokeWidth: 2,
                                 color: _primaryColor,
                               ),
