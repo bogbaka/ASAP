@@ -1,16 +1,25 @@
+import os
 import sys
 from pathlib import Path
+
+# Provide safe test-only configuration before importing the application.
+# These values prevent tests from depending on real database credentials.
+os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["JWT_SECRET_KEY"] = "test-only-jwt-secret-not-for-production"
+os.environ["OTP_HMAC_SECRET"] = (
+    "test-only-otp-secret-not-for-production"
+)
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
 
 from app.db.base import Base
 from app.db.dependencies import get_db

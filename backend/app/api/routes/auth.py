@@ -32,6 +32,13 @@ from app.services.otp import (
 )
 from app.services.sms import send_verification_sms
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalize a datetime to timezone-aware UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+
+    return value.astimezone(timezone.utc)
+
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -109,8 +116,10 @@ def _issue_otp(
 
         # An unused code or a code marked used after failed delivery
         # must still respect the cooldown and resend limits.
+        last_sent_at = _as_utc(verification.last_sent_at)
+
         seconds_since_last_send = (
-            now - verification.last_sent_at
+           now - last_sent_at
         ).total_seconds()
 
         if seconds_since_last_send < OTP_RESEND_COOLDOWN_SECONDS:
@@ -129,7 +138,10 @@ def _issue_otp(
                 headers={"Retry-After": str(remaining)},
             )
 
-        window_age = now - verification.resend_window_started_at
+        window_started_at = _as_utc(
+            verification.resend_window_started_at
+    )
+        window_age = now - window_started_at
 
         if window_age >= timedelta(
             minutes=OTP_RESEND_WINDOW_MINUTES
@@ -327,8 +339,9 @@ def verify_otp(
         )
 
     now = datetime.now(timezone.utc)
+    expires_at = _as_utc(verification.expires_at)
 
-    if verification.expires_at <= now:
+    if expires_at <= now:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
