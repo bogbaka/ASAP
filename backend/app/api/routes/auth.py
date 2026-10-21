@@ -24,13 +24,13 @@ from app.schemas.user import (
 )
 from app.services.otp import (
     MAX_OTP_ATTEMPTS,
-    OTP_EXPIRY_MINUTES,
     generate_otp,
     hash_otp,
     otp_expiration_time,
     verify_otp_hash,
 )
 from app.services.sms import send_verification_sms
+
 
 def _as_utc(value: datetime) -> datetime:
     """Normalize a datetime to timezone-aware UTC."""
@@ -90,7 +90,7 @@ def _issue_otp(
     *,
     is_resend: bool = False,
 ) -> None:
-    """Issue a new OTP while enforcing cooldown and resend limits."""
+    """Issue an OTP while enforcing cooldown and resend limits."""
 
     now = datetime.now(timezone.utc)
 
@@ -114,12 +114,11 @@ def _issue_otp(
                 detail="Request a new verification code first.",
             )
 
-        # An unused code or a code marked used after failed delivery
-        # must still respect the cooldown and resend limits.
+        # Enforce the cooldown between code requests.
         last_sent_at = _as_utc(verification.last_sent_at)
 
         seconds_since_last_send = (
-           now - last_sent_at
+            now - last_sent_at
         ).total_seconds()
 
         if seconds_since_last_send < OTP_RESEND_COOLDOWN_SECONDS:
@@ -138,9 +137,10 @@ def _issue_otp(
                 headers={"Retry-After": str(remaining)},
             )
 
+        # Reset the resend counter after its 15-minute window.
         window_started_at = _as_utc(
             verification.resend_window_started_at
-    )
+        )
         window_age = now - window_started_at
 
         if window_age >= timedelta(
@@ -183,7 +183,7 @@ def _issue_otp(
 
     # Never return the OTP through the HTTP response.
     if not send_verification_sms(user.phone_number, code):
-        # Mark the code unusable but retain resend history.
+        # Invalidate the code while preserving resend history.
         verification.used_at = datetime.now(timezone.utc)
 
         try:
@@ -211,7 +211,9 @@ def register_user(
 ) -> UserResponse:
     """Register a new ASAP user."""
 
-    conditions = [User.phone_number == user_data.phone_number]
+    conditions = [
+        User.phone_number == user_data.phone_number
+    ]
 
     if user_data.email:
         conditions.append(User.email == user_data.email)
@@ -417,6 +419,7 @@ def login_user(
         )
     )
 
+    # Reject invalid credentials.
     if user is None or not verify_password(
         login_data.password,
         user.password_hash,
@@ -426,12 +429,21 @@ def login_user(
             detail="Invalid phone number or password.",
         )
 
+    # Reject inactive accounts.
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account is inactive.",
         )
 
+    # Require phone verification before login.
+    if not user.phone_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your phone number before logging in.",
+        )
+
+    # Issue a token only after all checks pass.
     access_token = create_access_token(user.id)
 
     return TokenResponse(access_token=access_token)
