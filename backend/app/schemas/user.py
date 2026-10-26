@@ -27,3 +27,17 @@ class UserLogin(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+class OTPRegistrationRequest(BaseModel):
+    """Complete registration after successful OTP verification."""
+
+    registration_token: str
+    display_name: str = Field(min_length=2, max_length=80)
+    email: str | None = None
+
+
+class OTPRegistrationResponse(BaseModel):
+    """Return the completed profile and its access token."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse

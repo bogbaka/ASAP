@@ -36,3 +36,5 @@ class OTPVerificationResponse(BaseModel):
 
     verified: bool
     message: str
+    access_token: str | None = None
+    registration_token: str | None = None

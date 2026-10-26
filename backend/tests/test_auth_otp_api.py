@@ -37,7 +37,7 @@ def test_request_otp_returns_generic_message(
     test_database,
     monkeypatch,
 ):
-    """Requesting an OTP returns a generic message and never exposes the code."""
+    """Requesting an OTP returns a generic message without exposing the code."""
 
     create_unverified_user(test_database)
     sent_messages = []
@@ -89,12 +89,12 @@ def test_request_otp_returns_generic_message(
         assert verification.code_hash != sent_messages[0]["code"]
 
 
-def test_verified_account_does_not_receive_another_otp(
+def test_verified_account_can_request_otp_for_login(
     client,
     test_database,
     monkeypatch,
 ):
-    """A verified account should not receive another OTP."""
+    """A verified account can request an OTP for login."""
 
     with test_database() as db:
         user = User(
@@ -107,6 +107,7 @@ def test_verified_account_does_not_receive_another_otp(
 
         db.add(user)
         db.commit()
+        user_id = user.id 
 
     sent_messages = []
 
@@ -125,16 +126,24 @@ def test_verified_account_does_not_receive_another_otp(
     )
 
     assert response.status_code == 200
-    assert sent_messages == []
+    assert len(sent_messages) == 1
+    assert len(sent_messages[0]) == 6
+    assert sent_messages[0].isdigit()
 
+   
+    # Confirm an OTP verification record was created.
     with test_database() as db:
         verification = db.scalar(
-            select(PhoneVerification)
+            select(PhoneVerification).where(
+                PhoneVerification.user_id == user_id
+            )
         )
 
-        assert verification is None
+        assert verification is not None
+        assert verification.code_hash != sent_messages[0]
 
 
+    
 def test_correct_otp_verifies_account(
     client,
     test_database,
@@ -143,6 +152,7 @@ def test_correct_otp_verifies_account(
     """A valid OTP should verify the user's phone number."""
 
     user_id = create_unverified_user(test_database)
+
     sent_messages = []
 
     def fake_send_verification_sms(phone_number, code):
