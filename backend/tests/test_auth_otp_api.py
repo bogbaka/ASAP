@@ -143,13 +143,12 @@ def test_verified_account_can_request_otp_for_login(
         assert verification.code_hash != sent_messages[0]
 
 
-    
 def test_correct_otp_verifies_account(
     client,
     test_database,
     monkeypatch,
 ):
-    """A valid OTP should verify the user's phone number."""
+    """A valid OTP should verify the phone and return an access token."""
 
     user_id = create_unverified_user(test_database)
 
@@ -184,13 +183,20 @@ def test_correct_otp_verifies_account(
     )
 
     assert verify_response.status_code == 200
-    assert verify_response.json()["verified"] is True
+
+    response_data = verify_response.json()
+
+    assert response_data["verified"] is True
     assert (
-        verify_response.json()["message"]
+        response_data["message"]
         == "Your phone number has been verified successfully."
     )
 
-    # Confirm the account was updated in the test database.
+    # Existing users should receive an access token.
+    assert response_data["access_token"]
+    assert response_data["registration_token"] is None
+
+    # Confirm the account and verification record were updated.
     with test_database() as db:
         user = db.get(User, user_id)
 
@@ -205,6 +211,7 @@ def test_correct_otp_verifies_account(
 
         assert verification is not None
         assert verification.used_at is not None
+
 
 
 def test_incorrect_otp_attempts_are_limited(
@@ -382,3 +389,91 @@ def test_resend_otp_enforces_resend_limit(
 
     # Initial request plus three permitted resends.
     assert len(sent_messages) == MAX_OTP_RESENDS + 1
+
+def test_new_user_can_complete_otp_registration(
+    client,
+        test_database,
+        monkeypatch,
+):
+    """A new user can verify their phone and complete registration."""
+
+    sent_messages = []
+
+    def fake_send_verification_sms(phone_number, code):
+        sent_messages.append(code)
+        return True
+
+    monkeypatch.setattr(
+        "app.api.routes.auth.send_verification_sms",
+        fake_send_verification_sms,
+    )
+
+    # Step 1: Request an OTP for a new phone number.
+    request_response = client.post(
+        "/auth/request-otp",
+        json={"phone_number": TEST_PHONE},
+    )
+
+    assert request_response.status_code == 200
+    assert len(sent_messages) == 1
+
+    # Step 2: Verify the OTP.
+    verify_response = client.post(
+        "/auth/verify-otp",
+        json={
+            "phone_number": TEST_PHONE,
+            "code": sent_messages[0],
+        },
+    )
+
+    assert verify_response.status_code == 200
+
+    verification_data = verify_response.json()
+
+    assert verification_data["verified"] is True
+    assert verification_data["registration_token"]
+    assert verification_data["access_token"] is None
+
+    # The new user should still be pending profile completion.
+    with test_database() as db:
+        user = db.scalar(
+            select(User).where(
+                User.phone_number == TEST_PHONE
+            )
+        )
+
+        assert user is not None
+        assert user.display_name == "Pending ASAP Profile"
+        assert user.phone_verified is False
+
+    # Step 3: Complete registration using the registration token.
+    registration_response = client.post(
+        "/auth/register",
+        json={
+            "registration_token": verification_data[
+                "registration_token"
+            ],
+            "display_name": "New OTP User",
+        },
+    )
+
+    assert registration_response.status_code == 201
+
+    registration_data = registration_response.json()
+
+    assert registration_data["access_token"]
+    assert registration_data["token_type"].lower() == "bearer"
+    assert registration_data["user"]["phone_number"] == TEST_PHONE
+    assert registration_data["user"]["display_name"] == "New OTP User"
+
+    # Step 4: Confirm that registration completed in the database.
+    with test_database() as db:
+        user = db.scalar(
+            select(User).where(
+                User.phone_number == TEST_PHONE
+            )
+        )
+
+        assert user is not None
+        assert user.display_name == "New OTP User"
+        assert user.phone_verified is True

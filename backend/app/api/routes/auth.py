@@ -12,6 +12,7 @@ from app.api.dependencies import get_current_user
 from app.core.security import hash_password, verify_password
 from app.core.tokens import (
     create_access_token,
+    create_registration_token,
     decode_registration_token,
 )
 from app.db.dependencies import get_db
@@ -114,7 +115,6 @@ def _issue_otp(
             resend_window_started_at=now,
             last_sent_at=now,
         )
-
         db.add(verification)
 
     else:
@@ -125,7 +125,9 @@ def _issue_otp(
             )
 
         last_sent_at = _as_utc(verification.last_sent_at)
-        seconds_since_last_send = (now - last_sent_at).total_seconds()
+        seconds_since_last_send = (
+            now - last_sent_at
+        ).total_seconds()
 
         if seconds_since_last_send < OTP_RESEND_COOLDOWN_SECONDS:
             remaining = max(
@@ -181,7 +183,6 @@ def _issue_otp(
         db.add(verification)
         db.commit()
         db.refresh(verification)
-
     except Exception:
         db.rollback()
         raise
@@ -277,7 +278,6 @@ def register_user(
         try:
             db.commit()
             db.refresh(user)
-
         except IntegrityError:
             db.rollback()
 
@@ -291,7 +291,7 @@ def register_user(
             user=user,
         )
 
-    # Password-based registration.
+    # Legacy password-based registration.
     conditions = [User.phone_number == user_data.phone_number]
 
     if user_data.email:
@@ -318,7 +318,6 @@ def register_user(
         db.add(user)
         db.commit()
         db.refresh(user)
-
     except IntegrityError:
         db.rollback()
 
@@ -356,7 +355,6 @@ def request_otp(
             db.add(user)
             db.commit()
             db.refresh(user)
-
         except IntegrityError:
             db.rollback()
             user = _get_user_by_phone(db, request.phone_number)
@@ -385,7 +383,7 @@ def resend_otp(
 
     user = _get_user_by_phone(db, request.phone_number)
 
-    if user is None or not user.is_active or user.phone_verified:
+    if user is None or not user.is_active:
         return OTPResponse(message=GENERIC_OTP_MESSAGE)
 
     verification = _get_verification(db, user.id)
@@ -415,16 +413,10 @@ def verify_otp(
 
     user = _get_user_by_phone(db, request.phone_number)
 
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification code.",
-        )
-
-    if user.phone_verified:
-        return OTPVerificationResponse(
-            verified=True,
-            message="Your phone number is already verified.",
         )
 
     verification = _get_verification(db, user.id)
@@ -482,7 +474,14 @@ def verify_otp(
             detail="Incorrect verification code.",
         )
 
-    user.phone_verified = True
+    is_pending_registration = (
+        user.display_name == PENDING_PROFILE_NAME
+    )
+
+    # New users stay pending until profile completion.
+    if not is_pending_registration:
+        user.phone_verified = True
+
     verification.used_at = now
 
     try:
@@ -491,9 +490,18 @@ def verify_otp(
         db.rollback()
         raise
 
+    if is_pending_registration:
+        return OTPVerificationResponse(
+            verified=True,
+            message="Your phone number has been verified successfully.",
+            registration_token=create_registration_token(user.id),
+        )
+
+    # Existing users receive an access token after OTP verification.
     return OTPVerificationResponse(
         verified=True,
         message="Your phone number has been verified successfully.",
+        access_token=create_access_token(user.id),
     )
 
 
@@ -505,7 +513,7 @@ def login_user(
     login_data: UserLogin,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
-    """Authenticate a user and return an access token."""
+    """Authenticate a user using the legacy password-based flow."""
 
     user = db.scalar(
         select(User).where(
@@ -513,7 +521,6 @@ def login_user(
         )
     )
 
-    # Reject invalid credentials.
     if user is None or not verify_password(
         login_data.password,
         user.password_hash,
@@ -523,14 +530,12 @@ def login_user(
             detail="Invalid phone number or password.",
         )
 
-    # Reject inactive accounts.
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account is inactive.",
         )
 
-    # Require phone verification before login.
     if not user.phone_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -540,7 +545,7 @@ def login_user(
     access_token = create_access_token(user.id)
 
     return TokenResponse(access_token=access_token)
-
+    
 
 @router.get(
     "/me",
