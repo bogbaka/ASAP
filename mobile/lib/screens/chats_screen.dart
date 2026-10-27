@@ -16,7 +16,7 @@ class ChatsScreen extends StatefulWidget {
 }
 
 class _ChatsScreenState extends State<ChatsScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _accentColor = Color(0xFF25D366);
 
   int _selectedTab = 0;
@@ -42,27 +42,27 @@ class _ChatsScreenState extends State<ChatsScreen> {
       name: 'Amaka',
       initials: 'A',
       avatarColor: Colors.pink.shade300,
-      message: 'Hey! How are you doing?',
-      time: '9:18 AM',
-      unreadCount: 2,
+      message: '',
+      time: '',
+      unreadCount: 0,
       isOnline: true,
     ),
     ChatConversation(
       name: 'Daniel',
       initials: 'D',
       avatarColor: Colors.blue.shade400,
-      message: 'See you tomorrow!',
-      time: '8:45 AM',
-      unreadCount: 1,
+      message: '',
+      time: '',
+      unreadCount: 0,
       isOnline: false,
     ),
     ChatConversation(
       name: 'ASAP Developers',
       initials: 'AD',
       avatarColor: Colors.deepPurple.shade300,
-      message: 'You: The mobile screens are ready.',
-      time: 'Yesterday',
-      unreadCount: 3,
+      message: '',
+      time: '',
+      unreadCount: 0,
       isOnline: false,
       isGroup: true,
     ),
@@ -70,8 +70,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
       name: 'Mum',
       initials: 'M',
       avatarColor: Colors.orange.shade400,
-      message: 'Have you eaten?',
-      time: 'Yesterday',
+      message: '',
+      time: '',
       unreadCount: 0,
       isOnline: false,
     ),
@@ -79,8 +79,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
       name: 'Samuel',
       initials: 'S',
       avatarColor: Colors.teal.shade300,
-      message: 'Thank you so much!',
-      time: 'Monday',
+      message: '',
+      time: '',
       unreadCount: 0,
       isOnline: false,
     ),
@@ -88,8 +88,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
       name: 'Study Group',
       initials: 'SG',
       avatarColor: Colors.indigo.shade300,
-      message: 'Chinwe: Check the assignment.',
-      time: 'Monday',
+      message: '',
+      time: '',
       unreadCount: 0,
       isOnline: false,
       isGroup: true,
@@ -98,8 +98,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
       name: 'Chinwe',
       initials: 'C',
       avatarColor: Colors.green.shade400,
-      message: 'I will send it shortly.',
-      time: 'Sunday',
+      message: '',
+      time: '',
       unreadCount: 0,
       isOnline: false,
     ),
@@ -143,18 +143,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   // Refresh chat-list previews from the local Drift database.
-  // Sample previews remain visible for conversations that have never been saved.
+  // Empty conversations stay empty until you send a message.
   Future<void> _refreshConversationPreviews() async {
     try {
-      final savedConversations =
-          await appDatabase.select(appDatabase.conversations).get();
-      _conversationActivityTimes
-        ..clear()
-        ..addEntries(
-          savedConversations.map(
-            (item) => MapEntry(item.id, item.updatedAt),
-          ),
-        );
+      final savedConversations = await appDatabase
+          .select(appDatabase.conversations)
+          .get();
+      // A saved conversation alone is not activity.
+      // Only actual sent messages determine its position in the chat list.
+      _conversationActivityTimes.clear();
       final savedIds = savedConversations.map((item) => item.id).toSet();
 
       for (final conversation in _conversations) {
@@ -164,37 +161,35 @@ class _ChatsScreenState extends State<ChatsScreen> {
           continue;
         }
 
-        final allConversationMessages = await (
-            appDatabase.select(appDatabase.messages)
-              ..where((message) =>
-                  message.conversationId.equals(conversationId)))
-          .get();
-        final unreadMessages = allConversationMessages
-            .where((message) => !message.isOutgoing && !message.isRead)
+        // Incoming-message delivery is not implemented yet, so only
+        // messages sent by this user appear in the chat-list preview.
+        conversation.unreadCount = 0;
+
+        final latestMessages =
+            await (appDatabase.select(appDatabase.messages)
+                  ..where(
+                    (message) => message.conversationId.equals(conversationId),
+                  )
+                  ..orderBy([
+                    (message) => OrderingTerm.desc(message.sentAt),
+                    (message) => OrderingTerm.desc(message.id),
+                  ]))
+                .get();
+
+        final outgoingMessages = latestMessages
+            .where((message) => message.isOutgoing)
             .toList();
-        conversation.unreadCount = unreadMessages.length;
 
-        final latestMessages = await (appDatabase.select(appDatabase.messages)
-              ..where((message) =>
-                  message.conversationId.equals(conversationId))
-              ..orderBy([
-                (message) => OrderingTerm.desc(message.sentAt),
-                (message) => OrderingTerm.desc(message.id),
-              ])
-              ..limit(1))
-            .get();
-
-        if (latestMessages.isEmpty) {
-          // The conversation exists, but its messages were cleared.
+        if (outgoingMessages.isEmpty) {
+          // No message has been sent by this user in this conversation.
           conversation.message = '';
           conversation.time = '';
           continue;
         }
 
-        final latest = latestMessages.first;
-        conversation.message = latest.isOutgoing
-            ? 'You: ${latest.content}'
-            : latest.content;
+        final latest = outgoingMessages.first;
+        _conversationActivityTimes[conversationId] = latest.sentAt;
+        conversation.message = 'You: ${latest.content}';
         conversation.time = _formatConversationTime(latest.sentAt);
       }
 
@@ -295,8 +290,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _conversations[index].name: index,
     };
     filtered.sort((first, second) {
-      final activityComparison =
-          _compareConversationActivity(first, second);
+      final activityComparison = _compareConversationActivity(first, second);
       if (activityComparison != 0) return activityComparison;
       return originalPositions[first.name]!.compareTo(
         originalPositions[second.name]!,
@@ -314,8 +308,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         _conversations[index].name: index,
     };
     archived.sort((first, second) {
-      final activityComparison =
-          _compareConversationActivity(first, second);
+      final activityComparison = _compareConversationActivity(first, second);
       if (activityComparison != 0) return activityComparison;
       return originalPositions[first.name]!.compareTo(
         originalPositions[second.name]!,
@@ -371,7 +364,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
     try {
       // Create a local conversation record if this is still a sample chat.
       // insertOrIgnore preserves the existing preview and activity timestamp.
-      await appDatabase.into(appDatabase.conversations).insert(
+      await appDatabase
+          .into(appDatabase.conversations)
+          .insert(
             ConversationsCompanion(
               id: Value(conversationId),
               contactName: Value(conversation.name),
@@ -380,8 +375,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           );
 
       await (appDatabase.update(appDatabase.messages)
-            ..where((message) =>
-                message.conversationId.equals(conversationId)))
+            ..where((message) => message.conversationId.equals(conversationId)))
           .write(const MessagesCompanion(isRead: Value(true)));
     } catch (error) {
       debugPrint('Unable to mark conversation as read: $error');
@@ -390,6 +384,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
     if (!mounted) return;
 
     if (!mounted) return;
+
+    // Record the outgoing-message count before opening the chat.
+    // Merely viewing a conversation must not change its list position.
+    final messagesBeforeOpening = await (appDatabase.select(
+      appDatabase.messages,
+    )..where((message) => message.conversationId.equals(conversationId))).get();
+    final outgoingCountBefore = messagesBeforeOpening
+        .where((message) => message.isOutgoing)
+        .length;
 
     await Navigator.push<void>(
       context,
@@ -403,7 +406,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
       ),
     );
 
-    if (mounted) await _refreshConversationPreviews();
+    if (!mounted) return;
+
+    // Refresh only when outgoing-message activity changed, such as
+    // sending a message or clearing the conversation.
+    final messagesAfterOpening = await (appDatabase.select(
+      appDatabase.messages,
+    )..where((message) => message.conversationId.equals(conversationId))).get();
+    final outgoingCountAfter = messagesAfterOpening
+        .where((message) => message.isOutgoing)
+        .length;
+
+    if (outgoingCountAfter != outgoingCountBefore) {
+      await _refreshConversationPreviews();
+    }
   }
 
   // Favorite or unfavorite a conversation.
@@ -1810,13 +1826,37 @@ class _ChatsScreenState extends State<ChatsScreen> {
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
 
   void _showComingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$feature settings are coming soon.'),
-        behavior: SnackBarBehavior.floating,
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('$feature is not available yet.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
+  void _openAccountSettings(BuildContext context) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const AccountSettingsScreen()),
+    );
+  }
+
+  Widget _sectionHeading(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 22, 16, 6),
+      child: Text(
+        title.toUpperCase(),
+        style: const TextStyle(
+          color: _primaryColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+        ),
       ),
     );
   }
@@ -1824,6 +1864,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Settings'),
         backgroundColor: _primaryColor,
@@ -1831,31 +1872,45 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
-          const ListTile(
-            leading: CircleAvatar(
-              radius: 28,
+          // Profile summary.
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 8,
+            ),
+            leading: const CircleAvatar(
+              radius: 29,
               backgroundColor: _primaryColor,
-              child: Icon(Icons.person, color: Colors.white, size: 30),
+              child: Icon(Icons.person_outline, color: Colors.white, size: 32),
             ),
-            title: Text(
+            title: const Text(
               'ASAP account',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 17),
             ),
-            subtitle: Text('Manage your account details'),
+            subtitle: const Text('Manage your account details'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () => _openAccountSettings(context),
           ),
           const Divider(height: 1),
+
+          _sectionHeading('Your account'),
+          _SettingsItem(
+            icon: Icons.workspace_premium_outlined,
+            title: 'Subscriptions',
+            subtitle: 'Manage your subscriptions',
+            onTap: () => _showComingSoon(context, 'Subscriptions'),
+          ),
+          _SettingsItem(
+            icon: Icons.devices_outlined,
+            title: 'Linked devices',
+            subtitle: 'Manage devices connected to ASAP',
+            onTap: () => _showComingSoon(context, 'Linked devices'),
+          ),
           _SettingsItem(
             icon: Icons.person_outline,
             title: 'Account',
             subtitle: 'Security and account information',
-            onTap: () {
-              Navigator.push<void>(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => const AccountSettingsScreen(),
-                ),
-              );
-            },
+            onTap: () => _openAccountSettings(context),
           ),
           _SettingsItem(
             icon: Icons.lock_outline,
@@ -1864,10 +1919,25 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => _showComingSoon(context, 'Privacy'),
           ),
           _SettingsItem(
+            icon: Icons.list_alt_outlined,
+            title: 'Lists',
+            subtitle: 'Organise your chats and contacts',
+            onTap: () => _showComingSoon(context, 'Lists'),
+          ),
+
+          const Divider(height: 12),
+          _sectionHeading('App preferences'),
+          _SettingsItem(
             icon: Icons.chat_bubble_outline,
             title: 'Chats',
             subtitle: 'Chat display and conversation options',
             onTap: () => _showComingSoon(context, 'Chats'),
+          ),
+          _SettingsItem(
+            icon: Icons.palette_outlined,
+            title: 'Appearance',
+            subtitle: 'Theme and display preferences',
+            onTap: () => _showComingSoon(context, 'Appearance'),
           ),
           _SettingsItem(
             icon: Icons.notifications_none,
@@ -1882,27 +1952,71 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => _showComingSoon(context, 'Storage and data'),
           ),
           _SettingsItem(
-            icon: Icons.devices_outlined,
-            title: 'Linked devices',
-            subtitle: 'Manage connected devices',
-            onTap: () => _showComingSoon(context, 'Linked devices'),
+            icon: Icons.family_restroom_outlined,
+            title: 'Parental controls',
+            subtitle: 'Manage safety and supervision options',
+            onTap: () => _showComingSoon(context, 'Parental controls'),
           ),
           _SettingsItem(
-            icon: Icons.help_outline,
-            title: 'Help',
-            subtitle: 'Help centre and app information',
-            onTap: () => _showComingSoon(context, 'Help'),
+            icon: Icons.accessibility_new_outlined,
+            title: 'Accessibility',
+            subtitle: 'Make ASAP easier to use',
+            onTap: () => _showComingSoon(context, 'Accessibility'),
           ),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(
-              child: Text(
-                'ASAP · Messaging made simple',
-                style: TextStyle(color: Colors.grey),
+          _SettingsItem(
+            icon: Icons.language_outlined,
+            title: 'App language',
+            subtitle: 'Choose your preferred language',
+            onTap: () => _showComingSoon(context, 'App language'),
+          ),
+
+          const Divider(height: 12),
+          _sectionHeading('Support and information'),
+          _SettingsItem(
+            icon: Icons.help_outline,
+            title: 'Help and feedback',
+            subtitle: 'Get help or share your feedback',
+            onTap: () => _showComingSoon(context, 'Help and feedback'),
+          ),
+          _SettingsItem(
+            icon: Icons.person_add_alt_1_outlined,
+            title: 'Invite a friend',
+            subtitle: 'Tell friends about ASAP',
+            onTap: () => _showComingSoon(context, 'Invite a friend'),
+          ),
+          _SettingsItem(
+            icon: Icons.system_update_outlined,
+            title: 'App updates',
+            subtitle: 'Check for the latest version',
+            onTap: () => _showComingSoon(context, 'App updates'),
+          ),
+          _SettingsItem(
+            icon: Icons.hub_outlined,
+            title: 'Accounts center',
+            subtitle: 'Manage connected account experiences',
+            onTap: () => _showComingSoon(context, 'Accounts center'),
+          ),
+
+          const SizedBox(height: 24),
+          const Center(
+            child: Text(
+              'ASAP',
+              style: TextStyle(
+                color: Color(0xFF667781),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1,
               ),
             ),
           ),
+          const SizedBox(height: 6),
+          const Center(
+            child: Text(
+              'Messaging made simple',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -1925,10 +2039,11 @@ class _SettingsItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: const Color(0xFF075E54)),
-      title: Text(title),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      leading: Icon(icon, color: const Color(0xFF2563EB)),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
       subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       onTap: onTap,
     );
   }
@@ -2081,8 +2196,12 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       return Scaffold(
         backgroundColor: const Color(0xFF101010),
         appBar: AppBar(title: const Text('Status')),
-        body: const Center(child: Text('No status updates available.',
-            style: TextStyle(color: Colors.white))),
+        body: const Center(
+          child: Text(
+            'No status updates available.',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
       );
     }
     final status = _currentStatus;
@@ -2098,100 +2217,152 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [status.avatarColor.withValues(alpha: 0.95),
-                      const Color(0xFF101010)],
+                    colors: [
+                      status.avatarColor.withValues(alpha: 0.95),
+                      const Color(0xFF101010),
+                    ],
                   ),
                 ),
                 child: Center(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(32, 90, 32, 100),
-                    child: Text(status.text, textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 28,
-                        fontWeight: FontWeight.w600, height: 1.4)),
+                    child: Text(
+                      status.text,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
             Positioned.fill(
-              child: Row(children: [
-                Expanded(child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _showPreviousStatus,
-                  child: const SizedBox.expand(),
-                )),
-                Expanded(child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _showNextStatus,
-                  child: const SizedBox.expand(),
-                )),
-              ]),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _showPreviousStatus,
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: _showNextStatus,
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ],
+              ),
             ),
             Positioned(
-              top: 8, left: 12, right: 12,
-              child: Column(children: [
-                AnimatedBuilder(
-                  animation: _progressController,
-                  builder: (context, child) => LinearProgressIndicator(
-                    value: _progressController.value,
-                    backgroundColor: Colors.white30,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                    minHeight: 3,
+              top: 8,
+              left: 12,
+              right: 12,
+              child: Column(
+                children: [
+                  AnimatedBuilder(
+                    animation: _progressController,
+                    builder: (context, child) => LinearProgressIndicator(
+                      value: _progressController.value,
+                      backgroundColor: Colors.white30,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Colors.white,
+                      ),
+                      minHeight: 3,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Row(children: [
-                  CircleAvatar(backgroundColor: status.avatarColor,
-                    child: Text(status.initials,
-                      style: const TextStyle(color: Colors.white,
-                        fontWeight: FontWeight.bold))),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 16),
+                  Row(
                     children: [
-                      Text(status.name, style: const TextStyle(color: Colors.white,
-                        fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 3),
-                      Text(status.time, style: const TextStyle(
-                        color: Colors.white70, fontSize: 12)),
+                      CircleAvatar(
+                        backgroundColor: status.avatarColor,
+                        child: Text(
+                          status.initials,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              status.name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              status.time,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close status',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
                     ],
-                  )),
-                  IconButton(tooltip: 'Close status',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white)),
-                ]),
-              ]),
+                  ),
+                ],
+              ),
             ),
             if (!status.isMine)
               Positioned(
-                left: 12, right: 12, bottom: 12,
-                child: Row(children: [
-                  Expanded(child: TextField(
-                    controller: _replyController,
-                    focusNode: _replyFocus,
-                    style: const TextStyle(color: Colors.white),
-                    textCapitalization: TextCapitalization.sentences,
-                    maxLines: 3, minLines: 1,
-                    onSubmitted: (_) => _openReplyConversation(),
-                    decoration: InputDecoration(
-                      hintText: 'Reply to ${status.name}...',
-                      hintStyle: const TextStyle(color: Colors.white70),
-                      filled: true,
-                      fillColor: const Color(0x99000000),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(26),
-                        borderSide: const BorderSide(color: Colors.white70)),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(26),
-                        borderSide: const BorderSide(color: Colors.white70)),
+                left: 12,
+                right: 12,
+                bottom: 12,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _replyController,
+                        focusNode: _replyFocus,
+                        style: const TextStyle(color: Colors.white),
+                        textCapitalization: TextCapitalization.sentences,
+                        maxLines: 3,
+                        minLines: 1,
+                        onSubmitted: (_) => _openReplyConversation(),
+                        decoration: InputDecoration(
+                          hintText: 'Reply to ${status.name}...',
+                          hintStyle: const TextStyle(color: Colors.white70),
+                          filled: true,
+                          fillColor: const Color(0x99000000),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(26),
+                            borderSide: const BorderSide(color: Colors.white70),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(26),
+                            borderSide: const BorderSide(color: Colors.white70),
+                          ),
+                        ),
+                      ),
                     ),
-                  )),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    tooltip: 'Continue reply in chat',
-                    onPressed: _openReplyConversation,
-                    icon: const Icon(Icons.send),
-                  ),
-                ]),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      tooltip: 'Continue reply in chat',
+                      onPressed: _openReplyConversation,
+                      icon: const Icon(Icons.send),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),

@@ -14,17 +14,15 @@ class ProfileSetupScreen extends StatefulWidget {
   });
 
   @override
-  State<ProfileSetupScreen> createState() =>
-      _ProfileSetupScreenState();
+  State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
 }
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
-  final TextEditingController _nameController =
-      TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
 
   final AuthService _authService = AuthService();
 
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _backgroundColor = Color(0xFFF7F9F8);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
@@ -46,10 +44,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
@@ -65,16 +60,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
 
     if (displayName.length < 2) {
-      _showMessage(
-        'Your name must contain at least 2 characters.',
-      );
+      _showMessage('Your name must contain at least 2 characters.');
       return;
     }
 
     if (displayName.length > 30) {
-      _showMessage(
-        'Your name cannot exceed 30 characters.',
-      );
+      _showMessage('Your name cannot exceed 30 characters.');
       return;
     }
 
@@ -104,11 +95,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       final registeredName = user['display_name'];
 
-      if (registeredName is! String ||
-          registeredName.trim().isEmpty) {
-        _showMessage(
-          'Your profile could not be loaded. Please try again.',
-        );
+      if (registeredName is! String || registeredName.trim().isEmpty) {
+        _showMessage('Your profile could not be loaded. Please try again.');
         return;
       }
 
@@ -120,9 +108,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(
-          builder: (_) => ChatsScreen(
-            displayName: registeredName,
-          ),
+          builder: (_) => ChatsScreen(displayName: registeredName),
         ),
         (route) => false,
       );
@@ -153,9 +139,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           color: _headingColor,
-          onPressed: _isSaving
-              ? null
-              : () => Navigator.pop(context),
+          onPressed: _isSaving ? null : () => Navigator.pop(context),
         ),
         title: const Text(
           'Profile setup',
@@ -170,10 +154,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 28,
-              vertical: 24,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -213,9 +194,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         width: 120,
                         height: 120,
                         decoration: BoxDecoration(
-                          color: _primaryColor.withValues(
-                            alpha: 0.10,
-                          ),
+                          color: _primaryColor.withValues(alpha: 0.10),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -246,10 +225,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 const Text(
                   'Add a profile photo later',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 13,
-                  ),
+                  style: TextStyle(color: _secondaryColor, fontSize: 13),
                 ),
 
                 const SizedBox(height: 36),
@@ -281,9 +257,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   },
                   decoration: InputDecoration(
                     hintText: 'Enter your name',
-                    hintStyle: const TextStyle(
-                      color: _secondaryColor,
-                    ),
+                    hintStyle: const TextStyle(color: _secondaryColor),
                     prefixIcon: const Icon(
                       Icons.person_outline,
                       color: _secondaryColor,
@@ -291,22 +265,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     filled: true,
                     fillColor: Colors.white,
                     counterText: '',
-                    contentPadding:
-                        const EdgeInsets.symmetric(
+                    contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 17,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: _borderColor,
-                      ),
+                      borderSide: const BorderSide(color: _borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: _borderColor,
-                      ),
+                      borderSide: const BorderSide(color: _borderColor),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -326,19 +295,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _borderColor,
-                    ),
+                    border: Border.all(color: _borderColor),
                   ),
                   child: const Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: _primaryColor,
-                        size: 21,
-                      ),
+                      Icon(Icons.info_outline, color: _primaryColor, size: 21),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -366,14 +328,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _primaryColor,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          _primaryColor.withValues(
+                      disabledBackgroundColor: _primaryColor.withValues(
                         alpha: 0.6,
                       ),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                     child: _isSaving
@@ -400,10 +360,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 const Text(
                   'Welcome to ASAP — stay connected, anytime.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: _secondaryColor, fontSize: 12),
                 ),
               ],
             ),

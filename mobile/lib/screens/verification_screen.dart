@@ -8,19 +8,14 @@ import 'profile_setup_screen.dart';
 class VerificationScreen extends StatefulWidget {
   final String phoneNumber;
 
-  const VerificationScreen({
-    super.key,
-    required this.phoneNumber,
-  });
+  const VerificationScreen({super.key, required this.phoneNumber});
 
   @override
-  State<VerificationScreen> createState() =>
-      _VerificationScreenState();
+  State<VerificationScreen> createState() => _VerificationScreenState();
 }
 
 class _VerificationScreenState extends State<VerificationScreen> {
-  final TextEditingController _codeController =
-      TextEditingController();
+  final TextEditingController _codeController = TextEditingController();
 
   final FocusNode _codeFocusNode = FocusNode();
 
@@ -29,7 +24,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   bool _isVerifying = false;
   bool _isResending = false;
 
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _backgroundColor = Color(0xFFF7F9F8);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
@@ -50,10 +45,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
@@ -92,8 +84,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
       // New users receive a registration token.
       final registrationToken = response['registration_token'];
 
-      if (registrationToken is String &&
-          registrationToken.isNotEmpty) {
+      if (registrationToken is String && registrationToken.isNotEmpty) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -125,37 +116,28 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
         final displayName = profile['display_name'];
 
-        if (displayName is! String ||
-            displayName.trim().isEmpty) {
-          _showMessage(
-            'Your profile could not be loaded. Please try again.',
-          );
+        if (displayName is! String || displayName.trim().isEmpty) {
+          _showMessage('Your profile could not be loaded. Please try again.');
           return;
         }
 
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => ChatsScreen(
-              displayName: displayName,
-            ),
+            builder: (_) => ChatsScreen(displayName: displayName),
           ),
         );
 
         return;
       }
 
-      _showMessage(
-        'The server returned an unexpected verification response.',
-      );
+      _showMessage('The server returned an unexpected verification response.');
     } on AuthException catch (error) {
       _showMessage(error.message);
     } on FormatException catch (error) {
       _showMessage(error.message);
     } catch (_) {
-      _showMessage(
-        'Something went wrong. Please try again.',
-      );
+      _showMessage('Something went wrong. Please try again.');
     } finally {
       if (mounted) {
         setState(() {
@@ -183,18 +165,14 @@ class _VerificationScreenState extends State<VerificationScreen> {
       final message = response['message'];
 
       _showMessage(
-        message is String
-            ? message
-            : 'If this phone number can receive a verification code, a code will be sent.',
+        message is String ? message : 'If this phone number can receive a verification code, a code will be sent.',
       );
     } on AuthException catch (error) {
       _showMessage(error.message);
     } on FormatException catch (error) {
       _showMessage(error.message);
     } catch (_) {
-      _showMessage(
-        'Could not request another code. Please try again.',
-      );
+      _showMessage('Could not request another code. Please try again.');
     } finally {
       if (mounted) {
         setState(() {
@@ -219,9 +197,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
         backgroundColor: _backgroundColor,
         elevation: 0,
         leading: IconButton(
-          onPressed: (_isVerifying || _isResending)
-              ? null
-              : _changePhoneNumber,
+          onPressed: (_isVerifying || _isResending) ? null : _changePhoneNumber,
           icon: const Icon(Icons.arrow_back),
           color: _headingColor,
         ),
@@ -238,10 +214,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 28,
-              vertical: 24,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -251,9 +224,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     width: 100,
                     height: 100,
                     decoration: BoxDecoration(
-                      color: _primaryColor.withValues(
-                        alpha: 0.10,
-                      ),
+                      color: _primaryColor.withValues(alpha: 0.10),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -301,9 +272,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _borderColor,
-                    ),
+                    border: Border.all(color: _borderColor),
                   ),
                   child: Row(
                     children: [
@@ -382,22 +351,17 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     counterText: '',
                     filled: true,
                     fillColor: Colors.white,
-                    contentPadding:
-                        const EdgeInsets.symmetric(
+                    contentPadding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 18,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: _borderColor,
-                      ),
+                      borderSide: const BorderSide(color: _borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: _borderColor,
-                      ),
+                      borderSide: const BorderSide(color: _borderColor),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -422,19 +386,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _borderColor,
-                    ),
+                    border: Border.all(color: _borderColor),
                   ),
                   child: const Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: _primaryColor,
-                        size: 21,
-                      ),
+                      Icon(Icons.info_outline, color: _primaryColor, size: 21),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -465,14 +422,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _primaryColor,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          _primaryColor.withValues(
+                      disabledBackgroundColor: _primaryColor.withValues(
                         alpha: 0.6,
                       ),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                     child: _isVerifying
@@ -503,10 +458,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                     const Flexible(
                       child: Text(
                         "Didn't receive a code? ",
-                        style: TextStyle(
-                          color: _secondaryColor,
-                          fontSize: 13,
-                        ),
+                        style: TextStyle(color: _secondaryColor, fontSize: 13),
                       ),
                     ),
                     TextButton(
@@ -539,10 +491,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                 const Text(
                   'ASAP — Stay connected, anytime.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _secondaryColor,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: _secondaryColor, fontSize: 12),
                 ),
               ],
             ),

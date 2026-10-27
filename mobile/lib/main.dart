@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'app_settings.dart';
 import 'screens/phone_number_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await AppSettings.instance.load();
+
   runApp(const ASAPApp());
 }
 
@@ -11,23 +16,48 @@ class ASAPApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ASAP',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF7F9F8),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF075E54),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF7F9F8),
-          foregroundColor: Color(0xFF202C33),
-          elevation: 0,
-          centerTitle: false,
-        ),
-      ),
-      home: const WelcomeScreen(),
+    return AnimatedBuilder(
+      animation: AppSettings.instance,
+      builder: (context, child) {
+        final accentColor = AppSettings.instance.accentColor;
+
+        return MaterialApp(
+          title: 'ASAP',
+          debugShowCheckedModeBanner: false,
+          themeMode: AppSettings.instance.themeMode,
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: const Color(0xFFF7F9F8),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: accentColor,
+              brightness: Brightness.light,
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFFF7F9F8),
+              foregroundColor: Color(0xFF202C33),
+              elevation: 0,
+              centerTitle: false,
+            ),
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: accentColor,
+              brightness: Brightness.dark,
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Color(0xFF121212),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              centerTitle: false,
+            ),
+          ),
+          home: const WelcomeScreen(),
+        );
+      },
     );
   }
 }
@@ -37,6 +67,14 @@ class WelcomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accentColor = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final headingColor = isDark ? Colors.white : const Color(0xFF202C33);
+    final secondaryColor = isDark
+        ? const Color(0xFFB0BEC5)
+        : const Color(0xFF667781);
+
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -44,12 +82,11 @@ class WelcomeScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(),
-
               Container(
                 width: 110,
                 height: 110,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF075E54),
+                  color: accentColor,
                   borderRadius: BorderRadius.circular(32),
                 ),
                 child: const Icon(
@@ -58,46 +95,38 @@ class WelcomeScreen extends StatelessWidget {
                   color: Colors.white,
                 ),
               ),
-
               const SizedBox(height: 28),
-
-              const Text(
+              Text(
                 'ASAP',
                 style: TextStyle(
                   fontSize: 38,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 2,
-                  color: Color(0xFF075E54),
+                  color: accentColor,
                 ),
               ),
-
               const SizedBox(height: 12),
-
-              const Text(
+              Text(
                 'Stay connected, anytime.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF202C33),
+                  color: headingColor,
                 ),
               ),
-
               const SizedBox(height: 12),
-
-              const Text(
+              Text(
                 'Send messages, share moments, and stay close '
                 'to the people who matter.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.6,
-                  color: Color(0xFF667781),
+                  color: secondaryColor,
                 ),
               ),
-
               const Spacer(),
-
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -111,7 +140,7 @@ class WelcomeScreen extends StatelessWidget {
                     );
                   },
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF075E54),
+                    backgroundColor: accentColor,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -120,9 +149,7 @@ class WelcomeScreen extends StatelessWidget {
                   child: const Text('Get Started'),
                 ),
               ),
-
               const SizedBox(height: 14),
-
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -136,10 +163,8 @@ class WelcomeScreen extends StatelessWidget {
                     );
                   },
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF075E54),
-                    side: const BorderSide(
-                      color: Color(0xFF075E54),
-                    ),
+                    foregroundColor: accentColor,
+                    side: BorderSide(color: accentColor),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -147,15 +172,10 @@ class WelcomeScreen extends StatelessWidget {
                   child: const Text('Log In'),
                 ),
               ),
-
               const SizedBox(height: 20),
-
-              const Text(
+              Text(
                 'Simple. Private. Connected.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF667781),
-                ),
+                style: TextStyle(fontSize: 12, color: secondaryColor),
               ),
             ],
           ),

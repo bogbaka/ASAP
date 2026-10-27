@@ -31,7 +31,7 @@ class ConversationScreen extends StatefulWidget {
 }
 
 class _ConversationScreenState extends State<ConversationScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _backgroundColor = Color(0xFFEFEAE2);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
@@ -63,47 +63,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.dispose();
   }
 
-  List<ChatMessage> _createSampleMessages() {
-    return [
-      const ChatMessage(
-        text: 'Hey! How are you doing?',
-        time: '09:15',
-        isOutgoing: false,
-      ),
-      const ChatMessage(
-        text: "I'm fine, thank you! 😊",
-        time: '09:16',
-        isOutgoing: true,
-        isRead: true,
-      ),
-      const ChatMessage(
-        text: 'That is great!',
-        time: '09:16',
-        isOutgoing: false,
-      ),
-      const ChatMessage(
-        text: 'How is your ASAP project going?',
-        time: '09:17',
-        isOutgoing: false,
-      ),
-      const ChatMessage(
-        text: 'It is coming along nicely. 🚀',
-        time: '09:18',
-        isOutgoing: true,
-        isRead: true,
-      ),
-    ];
-  }
-
   Future<void> _loadConversation() async {
     try {
       final existingConversation = await (appDatabase.select(
         appDatabase.conversations,
       )..where((table) => table.id.equals(_conversationId))).getSingleOrNull();
 
-      final isNewConversation = existingConversation == null;
-
-      if (isNewConversation) {
+      if (existingConversation == null) {
         await appDatabase
             .into(appDatabase.conversations)
             .insert(
@@ -112,40 +78,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 contactName: widget.contactName,
               ),
             );
-
-        // Create demonstration messages only for a new conversation.
-        final samples = _createSampleMessages();
-        final now = DateTime.now();
-
-        for (var index = 0; index < samples.length; index++) {
-          final sample = samples[index];
-          final sentAt = now.subtract(
-            Duration(minutes: samples.length - index),
-          );
-
-          await appDatabase
-              .into(appDatabase.messages)
-              .insert(
-                MessagesCompanion.insert(
-                  conversationId: _conversationId,
-                  content: sample.text,
-                  isOutgoing: sample.isOutgoing,
-                  isRead: Value(sample.isRead),
-                  sentAt: Value(sentAt),
-                ),
-              );
-        }
-
-        if (samples.isNotEmpty) {
-          await (appDatabase.update(
-            appDatabase.conversations,
-          )..where((table) => table.id.equals(_conversationId))).write(
-            ConversationsCompanion(
-              lastMessage: Value(samples.last.text),
-              updatedAt: Value(now),
-            ),
-          );
-        }
       }
 
       final savedMessages =
@@ -172,7 +104,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ),
             ),
           );
-
         _isLoadingMessages = false;
       });
 
@@ -184,7 +115,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
       if (!mounted) return;
 
       setState(() => _isLoadingMessages = false);
-
       _showDemoMessage(
         'Unable to load messages. Please try reopening this conversation.',
       );
@@ -755,7 +685,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     Icons.done_all,
                     size: 15,
                     color: message.isRead
-                        ? const Color(0xFF34B7F1)
+                        ? const Color(0xFF16A34A)
                         : _secondaryColor,
                   ),
                 ],
@@ -859,7 +789,7 @@ class _ContactInfoScreen extends StatefulWidget {
 }
 
 class _ContactInfoScreenState extends State<_ContactInfoScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
 

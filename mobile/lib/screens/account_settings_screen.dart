@@ -8,7 +8,7 @@ class AccountSettingsScreen extends StatefulWidget {
 }
 
 class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
 
   bool _twoStepVerification = false;
   bool _securityNotifications = true;
@@ -16,10 +16,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
   }
 
   void _openTwoStepVerification() {
@@ -34,11 +33,14 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Two-step verification', style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold,
-                )),
+                const Text(
+                  'Two-step verification',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
-                const Text('Add another layer of protection to your ASAP account.'),
+                const Text(
+                  'Add another layer of protection to your ASAP account.',
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Enable two-step verification'),
@@ -84,14 +86,17 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   }
 
   Widget _sectionTitle(String title) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-        child: Text(title.toUpperCase(), style: const TextStyle(
-          color: _primaryColor,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1,
-        )),
-      );
+    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+    child: Text(
+      title.toUpperCase(),
+      style: const TextStyle(
+        color: _primaryColor,
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 1,
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -106,21 +111,32 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
         children: [
           _sectionTitle('Security'),
           ListTile(
-            leading: const Icon(Icons.verified_user_outlined, color: _primaryColor),
+            leading: const Icon(
+              Icons.verified_user_outlined,
+              color: _primaryColor,
+            ),
             title: const Text('Two-step verification'),
-            subtitle: Text(_twoStepVerification
-                ? 'Enabled on this screen'
-                : 'Add extra protection to your account'),
+            subtitle: Text(
+              _twoStepVerification
+                  ? 'Enabled on this screen'
+                  : 'Add extra protection to your account',
+            ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _openTwoStepVerification,
           ),
           SwitchListTile(
-            secondary: const Icon(Icons.notifications_active_outlined, color: _primaryColor),
+            secondary: const Icon(
+              Icons.notifications_active_outlined,
+              color: _primaryColor,
+            ),
             title: const Text('Security notifications'),
-            subtitle: const Text('Receive alerts about important security changes'),
+            subtitle: const Text(
+              'Receive alerts about important security changes',
+            ),
             value: _securityNotifications,
             activeThumbColor: _primaryColor,
-            onChanged: (value) => setState(() => _securityNotifications = value),
+            onChanged: (value) =>
+                setState(() => _securityNotifications = value),
           ),
           const Divider(height: 1),
           _sectionTitle('Account information'),
@@ -129,14 +145,18 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
             title: const Text('Phone number'),
             subtitle: const Text('Manage your registered phone number'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showMessage('Phone number management requires backend integration.'),
+            onTap: () => _showMessage(
+              'Phone number management requires backend integration.',
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.person_outline, color: _primaryColor),
             title: const Text('Personal information'),
             subtitle: const Text('Manage your account information'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showMessage('Profile editing will be connected to your account.'),
+            onTap: () => _showMessage(
+              'Profile editing will be connected to your account.',
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.delete_outline, color: Colors.red),

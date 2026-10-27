@@ -7,13 +7,11 @@ class PhoneNumberScreen extends StatefulWidget {
   const PhoneNumberScreen({super.key});
 
   @override
-  State<PhoneNumberScreen> createState() =>
-      _PhoneNumberScreenState();
+  State<PhoneNumberScreen> createState() => _PhoneNumberScreenState();
 }
 
 class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
-  final TextEditingController _phoneController =
-      TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
 
   final AuthService _authService = AuthService();
 
@@ -49,8 +47,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     // Remove that trunk prefix before adding +234.
     var nationalNumber = phoneNumber;
 
-    if (_countryCode == '+234' &&
-        nationalNumber.startsWith('0')) {
+    if (_countryCode == '+234' && nationalNumber.startsWith('0')) {
       nationalNumber = nationalNumber.substring(1);
     }
 
@@ -62,9 +59,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     });
 
     try {
-      await _authService.requestOtp(
-        phoneNumber: fullPhoneNumber,
-      );
+      await _authService.requestOtp(phoneNumber: fullPhoneNumber);
 
       if (!mounted) return;
 
@@ -75,9 +70,8 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => VerificationScreen(
-            phoneNumber: fullPhoneNumber,
-          ),
+          builder: (context) =>
+              VerificationScreen(phoneNumber: fullPhoneNumber),
         ),
       );
     } on AuthException catch (error) {
@@ -105,9 +99,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
         _isContinuing = false;
       });
 
-      _showMessage(
-        'Could not connect to the server. Please try again.',
-      );
+      _showMessage('Could not connect to the server. Please try again.');
     }
   }
 
@@ -116,16 +108,13 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF075E54);
+    const primaryColor = Color(0xFF2563EB);
     const backgroundColor = Color(0xFFF7F9F8);
     const headingColor = Color(0xFF202C33);
     const secondaryColor = Color(0xFF667781);
@@ -138,10 +127,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
         elevation: 0,
         leading: IconButton(
           tooltip: 'Back',
-          icon: const Icon(
-            Icons.arrow_back,
-            color: headingColor,
-          ),
+          icon: const Icon(Icons.arrow_back, color: headingColor),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -279,15 +265,11 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                           ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: borderColor,
-                            ),
+                            borderSide: const BorderSide(color: borderColor),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: borderColor,
-                            ),
+                            borderSide: const BorderSide(color: borderColor),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -326,11 +308,7 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                   child: const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.lock_outline,
-                        size: 20,
-                        color: primaryColor,
-                      ),
+                      Icon(Icons.lock_outline, size: 20, color: primaryColor),
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -359,8 +337,9 @@ class _PhoneNumberScreenState extends State<PhoneNumberScreen> {
                     style: FilledButton.styleFrom(
                       backgroundColor: primaryColor,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          primaryColor.withValues(alpha: 0.6),
+                      disabledBackgroundColor: primaryColor.withValues(
+                        alpha: 0.6,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
