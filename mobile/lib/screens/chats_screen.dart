@@ -5,6 +5,7 @@ import '../database/database_connection.dart';
 import '../database/app_database.dart';
 import 'conversation_screen.dart';
 import 'account_settings_screen.dart';
+import 'appearance_settings_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key, required this.displayName});
@@ -354,6 +355,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   // Opening a chat marks incoming messages as read and persists that state.
   Future<void> _openConversation(ChatConversation conversation) async {
+    final navigator = Navigator.of(context);
     final conversationId = conversation.name.trim().toLowerCase();
 
     // Clear the visible badge immediately, before opening the conversation.
@@ -383,8 +385,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
     if (!mounted) return;
 
-    if (!mounted) return;
-
     // Record the outgoing-message count before opening the chat.
     // Merely viewing a conversation must not change its list position.
     final messagesBeforeOpening = await (appDatabase.select(
@@ -394,8 +394,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         .where((message) => message.isOutgoing)
         .length;
 
-    await Navigator.push<void>(
-      context,
+    await navigator.push<void>(
       MaterialPageRoute(
         builder: (context) => ConversationScreen(
           contactName: conversation.name,
@@ -1937,7 +1936,14 @@ class SettingsScreen extends StatelessWidget {
             icon: Icons.palette_outlined,
             title: 'Appearance',
             subtitle: 'Theme and display preferences',
-            onTap: () => _showComingSoon(context, 'Appearance'),
+            onTap: () {
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const AppearanceSettingsScreen(),
+                ),
+              );
+            },
           ),
           _SettingsItem(
             icon: Icons.notifications_none,

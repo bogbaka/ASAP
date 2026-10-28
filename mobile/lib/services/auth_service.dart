@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -82,6 +83,46 @@ class AuthService {
               'Accept': 'application/json',
               'Authorization': 'Bearer $accessToken',
             },
+          )
+          .timeout(ApiConfig.connectionTimeout);
+
+      return _decodeResponse(response);
+    } on AuthException {
+      rethrow;
+    } on FormatException {
+      rethrow;
+    } catch (_) {
+      throw const AuthException(
+        'Could not connect to the server. Check your connection and try again.',
+      );
+    }
+  }
+
+  /// Updates the currently authenticated user's profile.
+  Future<Map<String, dynamic>> updateMyProfile({
+    required String accessToken,
+    required String displayName,
+    required String email,
+    required String about,
+  }) async {
+    try {
+      final response = await _client
+          .patch(
+            _endpoint('/auth/me'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $accessToken',
+            },
+            body: jsonEncode({
+              'display_name': displayName.trim(),
+              'email': email.trim().isEmpty
+                  ? null
+                  : email.trim(),
+              'about': about.trim().isEmpty
+                  ? null
+                  : about.trim(),
+            }),
           )
           .timeout(ApiConfig.connectionTimeout);
 
