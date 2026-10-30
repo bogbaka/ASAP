@@ -31,7 +31,7 @@ class ConversationScreen extends StatefulWidget {
 }
 
 class _ConversationScreenState extends State<ConversationScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _backgroundColor = Color(0xFFEFEAE2);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
@@ -137,15 +137,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
         }
 
         if (samples.isNotEmpty) {
-          await (appDatabase.update(
-            appDatabase.conversations,
-          )..where((table) => table.id.equals(_conversationId))).write(
-            ConversationsCompanion(
-              lastMessage: Value(samples.last.text),
-              updatedAt: Value(now),
-            ),
-          );
-        }
+  final latestSampleTime = now.subtract(
+    const Duration(minutes: 1),
+  );
+
+  await (appDatabase.update(
+    appDatabase.conversations,
+  )..where((table) => table.id.equals(_conversationId))).write(
+    ConversationsCompanion(
+      lastMessage: Value(samples.last.text),
+      updatedAt: Value(latestSampleTime),
+    ),
+  );
+}
       }
 
       final savedMessages =
@@ -859,7 +863,7 @@ class _ContactInfoScreen extends StatefulWidget {
 }
 
 class _ContactInfoScreenState extends State<_ContactInfoScreen> {
-  static const Color _primaryColor = Color(0xFF075E54);
+  static const Color _primaryColor = Color(0xFF2563EB);
   static const Color _headingColor = Color(0xFF202C33);
   static const Color _secondaryColor = Color(0xFF667781);
 
